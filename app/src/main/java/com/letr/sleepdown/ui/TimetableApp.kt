@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -52,15 +53,21 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import com.letr.sleepdown.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.AssistantPhoto
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -72,6 +79,8 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -83,6 +92,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
@@ -93,6 +103,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -134,8 +145,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -153,6 +166,7 @@ import com.letr.sleepdown.data.TimetableRepository
 import com.letr.sleepdown.logic.CourseColors
 import com.letr.sleepdown.logic.Weeks
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -161,6 +175,16 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+private val WakeUpEditorBackground = Color(0xFFFAF8FF)
+private val WakeUpEditorText = Color(0xFF4A4A4A)
+private val WakeUpEditorHint = Color(0xFFA3A3A3)
+private val WakeUpEditorDivider = Color(0xFFE0DFE8)
+private val WakeUpTeal = Color(0xFF16AEA0)
+private val WakeUpOrange = Color(0xFFFFA622)
+private val WakeUpBlue = Color(0xFF1E88E5)
+private val WakeUpRed = Color(0xFFF63D3E)
+private val WakeUpYellow = Color(0xFFFDD835)
 
 @Composable
 fun TimetableTheme(content: @Composable () -> Unit) {
@@ -215,6 +239,12 @@ private data class CellSelection(
     val endNode: Int,
 )
 
+private enum class CellGestureResult {
+    TAP,
+    SCROLL,
+    LONG_PRESS,
+}
+
 private enum class PickerTarget {
     DAY,
     START_NODE,
@@ -233,7 +263,7 @@ fun TimetableApp(repository: TimetableRepository) {
     var editingCourseId by remember { mutableStateOf<Long?>(null) }
     var editorDay by remember { mutableIntStateOf(1) }
     var editorStartNode by remember { mutableIntStateOf(1) }
-    var editorStep by remember { mutableIntStateOf(1) }
+    var editorStep by remember { mutableIntStateOf(2) }
     var selectLatestAfterImport by remember { mutableStateOf(false) }
     var importTableCountBefore by remember { mutableIntStateOf(-1) }
 
@@ -285,7 +315,7 @@ fun TimetableApp(repository: TimetableRepository) {
         AppContainer.setCurrentTableId(context, id)
     }
 
-    fun openAddCourse(day: Int = 1, startNode: Int = 1, step: Int = 1) {
+    fun openAddCourse(day: Int = 1, startNode: Int = 1, step: Int = 2) {
         editingCourseId = null
         editorDay = day
         editorStartNode = startNode
@@ -520,7 +550,7 @@ private fun ScheduleScreen(
                 week = pagerState.currentPage + 1,
                 currentWeek = current,
                 onWeekClick = { weekDialog = true },
-                onAdd = { onAddCourse(1, 1, 1) },
+                onAdd = { onAddCourse(1, 1, 2) },
                 onImport = onOpenImport,
                 onShare = { shareMenu = true },
                 onMore = { moreMenu = true },
@@ -786,6 +816,8 @@ private fun ScheduleGrid(
     }.toSet()
     val textColor = Color(table.textColor.toInt())
     var selection by remember(week) { mutableStateOf<CellSelection?>(null) }
+    var selectionAnchorNode by remember(week) { mutableStateOf<Int?>(null) }
+    var selectionCursorNode by remember(week) { mutableStateOf<Int?>(null) }
     val rowHeightPx = with(LocalDensity.current) { rowHeight.toPx() }
 
     Row(modifier = Modifier.fillMaxSize()) {
@@ -825,38 +857,57 @@ private fun ScheduleGrid(
                                             val down = awaitFirstDown(requireUnconsumed = false)
                                             var totalDragX = 0f
                                             var totalDragY = 0f
-                                            var moved = false
-                                            var dragging = false
-                                            while (true) {
-                                                val event = awaitPointerEvent()
-                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                                if (!change.pressed) break
-                                                totalDragX += change.position.x - change.previousPosition.x
-                                                totalDragY += change.position.y - change.previousPosition.y
-                                                if (!dragging && (abs(totalDragX) > viewConfiguration.touchSlop || abs(totalDragY) > viewConfiguration.touchSlop)) {
-                                                    moved = true
-                                                    if (abs(totalDragY) >= abs(totalDragX)) {
-                                                        dragging = true
-                                                        selection = CellSelection(day, node, node)
+                                            val result = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                                        ?: return@withTimeoutOrNull CellGestureResult.SCROLL
+                                                    if (!change.pressed) {
+                                                        return@withTimeoutOrNull CellGestureResult.TAP
+                                                    }
+                                                    totalDragX += change.position.x - change.previousPosition.x
+                                                    totalDragY += change.position.y - change.previousPosition.y
+                                                    if (abs(totalDragX) > viewConfiguration.touchSlop || abs(totalDragY) > viewConfiguration.touchSlop) {
+                                                        return@withTimeoutOrNull CellGestureResult.SCROLL
                                                     }
                                                 }
-                                                if (dragging && cellCourse == null) {
-                                                    change.consume()
-                                                    val endNode = (node + (totalDragY / rowHeightPx).roundToInt())
-                                                        .coerceIn(1, nodeCount)
-                                                    selection = CellSelection(
-                                                        day = day,
-                                                        startNode = minOf(node, endNode),
-                                                        endNode = maxOf(node, endNode),
-                                                    )
-                                                }
+                                                CellGestureResult.LONG_PRESS
                                             }
-                                            if (!dragging && !moved && cellCourse == null) {
+
+                                            if (result == null) {
+                                                if (cellCourse == null) {
+                                                    selectionAnchorNode = node
+                                                    selectionCursorNode = node
+                                                    selection = CellSelection(day, node, node)
+                                                }
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                    if (!change.pressed) break
+                                                    totalDragX += change.position.x - change.previousPosition.x
+                                                    totalDragY += change.position.y - change.previousPosition.y
+                                                    if (cellCourse == null) {
+                                                        change.consume()
+                                                        val endNode = (node + (totalDragY / rowHeightPx).roundToInt())
+                                                            .coerceIn(1, nodeCount)
+                                                        selectionCursorNode = endNode
+                                                        selection = CellSelection(
+                                                            day = day,
+                                                            startNode = minOf(node, endNode),
+                                                            endNode = maxOf(node, endNode),
+                                                        )
+                                                    }
+                                                }
+                                            } else if (result == CellGestureResult.TAP && cellCourse == null) {
                                                 val existing = selection
                                                 if (existing != null && existing.day == day && node in existing.startNode..existing.endNode) {
                                                     selection = null
+                                                    selectionAnchorNode = null
+                                                    selectionCursorNode = null
                                                     onAddCourse(existing.day, existing.startNode, existing.endNode - existing.startNode + 1)
                                                 } else {
+                                                    selectionAnchorNode = node
+                                                    selectionCursorNode = node
                                                     selection = CellSelection(day, node, node)
                                                 }
                                             }
@@ -870,42 +921,49 @@ private fun ScheduleGrid(
             selection?.let { selected ->
                 val selectedColumn = dayToColumn[selected.day]
                 if (selectedColumn != null) {
+                    val selectionHeight = rowHeight * (selected.endNode - selected.startNode + 1).toFloat() - 2.dp
+                    val selectionTop = rowHeight * (selected.startNode - 1).toFloat() + 1.dp
+                    val handleOffsetY = selectionTop + ((selectionHeight - 72.dp).value / 2f).dp
+                    val handleOffsetX = if (selectedColumn == days.lastIndex) {
+                        columnWidth * selectedColumn.toFloat() - 32.dp
+                    } else {
+                        columnWidth * (selectedColumn + 1).toFloat() - 4.dp
+                    }
                     Box(
                         modifier = Modifier
-                            .offset(
-                                x = columnWidth * selectedColumn.toFloat() + 1.dp,
-                                y = rowHeight * (selected.startNode - 1).toFloat() + 1.dp,
-                            )
+                            .offset(x = columnWidth * selectedColumn.toFloat() + 1.dp, y = selectionTop)
                             .width((columnWidth - 2.dp).coerceAtLeast(1.dp))
-                            .height(rowHeight * (selected.endNode - selected.startNode + 1).toFloat() - 2.dp)
+                            .height(selectionHeight)
                             .background(Color(0xFFFF6272).copy(alpha = 0.75f), RoundedCornerShape(6.dp))
                             .border(2.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                            .pointerInput(selected, rowHeightPx) {
-                                var dragRows = 0f
-                                detectDragGestures(
-                                    onDragStart = { dragRows = 0f },
-                                    onDragEnd = { dragRows = 0f },
-                                    onDragCancel = { dragRows = 0f },
-                                    onDrag = { change, amount ->
-                                        change.consume()
-                                        dragRows += amount.y
-                                        val delta = (dragRows / rowHeightPx).roundToInt()
-                                        if (delta != 0) {
-                                            val end = (selected.endNode + delta).coerceIn(selected.startNode, nodeCount)
-                                            selection = selected.copy(endNode = end)
-                                            dragRows -= delta * rowHeightPx
-                                        }
-                                    },
-                                )
-                            }
                             .clickable {
                                 selection = null
+                                selectionAnchorNode = null
+                                selectionCursorNode = null
                                 onAddCourse(selected.day, selected.startNode, selected.endNode - selected.startNode + 1)
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "添加课程", tint = Color.White, modifier = Modifier.size(22.dp))
                     }
+                    SelectionResizeHandle(
+                        modifier = Modifier.offset(x = handleOffsetX, y = handleOffsetY),
+                        rowHeightPx = rowHeightPx,
+                        onDragRows = { delta ->
+                            val anchor = selectionAnchorNode ?: selected.startNode
+                            val current = selectionCursorNode ?: selected.endNode
+                            val next = (current + delta).coerceIn(1, nodeCount)
+                            if (next != current) {
+                                selectionAnchorNode = anchor
+                                selectionCursorNode = next
+                                selection = CellSelection(
+                                    day = selected.day,
+                                    startNode = minOf(anchor, next),
+                                    endNode = maxOf(anchor, next),
+                                )
+                            }
+                        },
+                    )
                 }
             }
             currentItems.forEach { item ->
@@ -943,6 +1001,37 @@ private fun ScheduleGrid(
             }
         }
     }
+}
+
+@Composable
+private fun SelectionResizeHandle(
+    modifier: Modifier,
+    rowHeightPx: Float,
+    onDragRows: (Int) -> Unit,
+) {
+    Image(
+        painter = painterResource(R.drawable.sd_add_course_guid_icon),
+        contentDescription = "调整课程节数",
+        modifier = modifier
+            .size(width = 36.dp, height = 72.dp)
+            .pointerInput(rowHeightPx) {
+                var dragPixels = 0f
+                detectDragGestures(
+                    onDragStart = { dragPixels = 0f },
+                    onDragEnd = { dragPixels = 0f },
+                    onDragCancel = { dragPixels = 0f },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        dragPixels += amount.y
+                        val delta = (dragPixels / rowHeightPx).roundToInt()
+                        if (delta != 0) {
+                            onDragRows(delta)
+                            dragPixels -= delta * rowHeightPx
+                        }
+                    },
+                )
+            },
+    )
 }
 
 @Composable
@@ -1174,16 +1263,20 @@ private fun ScreenScaffold(
     title: String,
     onBack: () -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
+    containerColor: Color = Color(0xFFF7F7F7),
+    titleSize: Int = 20,
+    titleWeight: FontWeight = FontWeight.SemiBold,
+    titleStartPadding: Dp = 0.dp,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
-        containerColor = Color(0xFFF7F7F7),
+        containerColor = containerColor,
         topBar = {
             TopAppBar(
-                title = { Text(title, color = Color(0xFF141414), fontWeight = FontWeight.SemiBold) },
+                title = { Text(title, modifier = Modifier.padding(start = titleStartPadding), color = Color(0xFF141414), fontSize = titleSize.sp, fontWeight = titleWeight) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color(0xFF141414)) } },
                 actions = actions,
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = containerColor),
             )
         },
         content = content,
@@ -1772,6 +1865,7 @@ private fun CourseEditorScreen(
     var inputTarget by remember { mutableStateOf<String?>(null) }
     var colorDialog by remember { mutableStateOf(false) }
     var customTimeInfo by remember { mutableStateOf(false) }
+    var roomEditorIndex by remember { mutableStateOf<Int?>(null) }
     val availableNodeTimes = nodeTimesFor(table, nodeTimes)
 
     LaunchedEffect(courseId, table.id, initialDay, initialStartNode, initialStep) {
@@ -1810,73 +1904,84 @@ private fun CourseEditorScreen(
         LoadingView()
         return
     }
+
+    fun save() {
+        when {
+            name.isBlank() -> error = "请填写课程名称"
+            drafts.isEmpty() -> error = "请至少添加一个时间段"
+            drafts.any { it.selectedWeeks.isEmpty() } -> error = "请至少选择一周"
+            else -> scope.launch {
+                val entity = CourseEntity(
+                    id = courseId ?: 0L,
+                    tableId = table.id,
+                    name = name.trim(),
+                    color = if (color == 0) CourseColors.colorFor(name) else color,
+                    teacher = teacher.trim(),
+                    note = note.trim(),
+                    credit = credit.toFloatOrNull() ?: 0f,
+                )
+                repository.saveCourse(table.id, entity, drafts.flatMap { it.toEntities(entity.id) })
+                onSaved()
+            }
+        }
+    }
+
     ScreenScaffold(
         title = if (courseId == null) "添加课程" else "编辑课程",
         onBack = onBack,
+        containerColor = WakeUpEditorBackground,
+        titleSize = 22,
+        titleWeight = FontWeight.Normal,
+        titleStartPadding = 3.dp,
         actions = {
-            IconButton(onClick = {
-                when {
-                    name.isBlank() -> error = "请填写课程名称"
-                    drafts.isEmpty() -> error = "请至少添加一个时间段"
-                    drafts.any { it.selectedWeeks.isEmpty() } -> error = "请至少选择一周"
-                    else -> scope.launch {
-                        val entity = CourseEntity(
-                            id = courseId ?: 0L,
-                            tableId = table.id,
-                            name = name.trim(),
-                            color = if (color == 0) CourseColors.colorFor(name) else color,
-                            teacher = teacher.trim(),
-                            note = note.trim(),
-                            credit = credit.toFloatOrNull() ?: 0f,
-                        )
-                        val times = drafts.flatMap { it.toEntities(entity.id) }
-                        repository.saveCourse(table.id, entity, times)
-                        onSaved()
-                    }
-                }
-            }) { Icon(Icons.Default.Save, contentDescription = "保存") }
+            TextButton(onClick = ::save, modifier = Modifier.offset(x = 7.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Text("保存", color = WakeUpEditorText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         },
     ) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            item {
-                SettingsGroup("课程信息") {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), label = { Text("课程名称") }, singleLine = true)
-                    if (existingCourses.isNotEmpty()) {
-                        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            existingCourses.distinctBy { it.name }.take(8).forEach { candidate ->
-                                OutlinedButton(onClick = { name = candidate.name }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) { Text(candidate.name, maxLines = 1) }
-                            }
-                        }
-                    }
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "颜色", if (color == 0) "自动分配" else colorName(color), tint = Color(0xFF2AA69B), onClick = { colorDialog = true })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Star, "学分", credit.ifBlank { "可不填" }, tint = Color(0xFFFF8A00), onClick = { inputTarget = "credit" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.StickyNote2, "备注", note.ifBlank { "可不填" }, tint = Color(0xFFFFC107), onClick = { inputTarget = "note" })
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(bottom = 88.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                item {
+                    CourseBaseEditorSection(
+                        name = name,
+                        onNameChange = { name = it },
+                        candidates = existingCourses,
+                        color = color,
+                        credit = credit,
+                        note = note,
+                        onColorClick = { colorDialog = true },
+                        onCreditClick = { inputTarget = "credit" },
+                        onNoteClick = { inputTarget = "note" },
+                    )
                 }
-            }
-            items(drafts.indices.toList(), key = { drafts[it].id * 1000L + it }) { index ->
-                TimeDraftEditor(
-                    index = index,
-                    draft = drafts[index],
-                    table = table,
-                    nodeTimes = availableNodeTimes,
-                    onChange = { drafts[index] = it },
-                    onRemove = { if (drafts.size > 1) drafts.removeAt(index) },
-                    onTeacher = { inputTarget = "teacher" },
-                    teacher = teacher,
-                    onCustomTimeInfo = { customTimeInfo = true },
-                )
-            }
-            item {
-                OutlinedButton(onClick = { drafts += defaultTimeDraft(table.maxWeek, 1, 1) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("添加时间段")
+                items(drafts.indices.toList(), key = { drafts[it].id * 1000L + it }) { index ->
+                    TimeDraftEditor(
+                        index = index,
+                        draft = drafts[index],
+                        table = table,
+                        nodeTimes = availableNodeTimes,
+                        onChange = { drafts[index] = it },
+                        onRemove = { if (drafts.size > 1) drafts.removeAt(index) },
+                        onTeacher = { inputTarget = "teacher" },
+                        onRoom = { roomEditorIndex = index },
+                        teacher = teacher,
+                        onCustomTimeInfo = { customTimeInfo = true },
+                    )
                 }
+                item { error?.let { Text(it, modifier = Modifier.padding(horizontal = 40.dp, vertical = 4.dp), color = Color(0xFFD32F2F), fontSize = 13.sp) } }
             }
-            item { error?.let { Text(it, modifier = Modifier.padding(horizontal = 24.dp), color = Color(0xFFD32F2F), fontSize = 13.sp) } }
+            FloatingActionButton(
+                onClick = { drafts += defaultTimeDraft(table.maxWeek, 1, 1) },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 40.dp),
+                containerColor = Color(0xFFDCE1FF),
+                contentColor = Color(0xFF03174B),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "添加时间段")
+            }
         }
     }
 
@@ -1899,6 +2004,16 @@ private fun CourseEditorScreen(
             onDismiss = { inputTarget = null },
         )
     }
+    roomEditorIndex?.let { index ->
+        TextInputDialog(
+            title = "上课地点",
+            initial = drafts.getOrNull(index)?.room.orEmpty(),
+            clearable = true,
+            onConfirm = { value -> drafts[index] = drafts[index].copy(room = value); roomEditorIndex = null },
+            onClear = { drafts[index] = drafts[index].copy(room = ""); roomEditorIndex = null },
+            onDismiss = { roomEditorIndex = null },
+        )
+    }
     if (colorDialog) {
         ColorChoiceDialog(title = "课程颜色", initial = color, includeAuto = true, onSelect = { color = it; colorDialog = false }, onDismiss = { colorDialog = false })
     }
@@ -1906,9 +2021,92 @@ private fun CourseEditorScreen(
         AlertDialog(
             onDismissRequest = { customTimeInfo = false },
             title = { Text("自定义时间") },
-            text = { Text("统一调整课程时间应回到主界面右上角菜单中的上课时间设置。自定义时间会按具体时间决定显示位置。") },
+            text = { Text("自定义时间会按照具体时间决定显示位置。") },
             confirmButton = { TextButton(onClick = { customTimeInfo = false }) { Text("知道了") } },
         )
+    }
+}
+
+@Composable
+private fun CourseBaseEditorSection(
+    name: String,
+    onNameChange: (String) -> Unit,
+    candidates: List<CourseEntity>,
+    color: Int,
+    credit: String,
+    note: String,
+    onColorClick: () -> Unit,
+    onCreditClick: () -> Unit,
+    onNoteClick: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_class_24, WakeUpTeal) {
+            BasicTextField(
+                value = name,
+                onValueChange = onNameChange,
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                singleLine = true,
+                textStyle = TextStyle(color = WakeUpEditorText, fontSize = 14.sp),
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                        if (name.isBlank()) Text("课程名称", color = WakeUpEditorHint, fontSize = 14.sp)
+                        innerTextField()
+                    }
+                },
+            )
+        }
+        if (name.isBlank() && candidates.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 56.dp, end = 24.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                candidates.distinctBy { it.name }.take(8).forEach { candidate ->
+                    OutlinedButton(onClick = { onNameChange(candidate.name) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
+                        Text(candidate.name, maxLines = 1, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+        val selectedColor = if (color == 0) Color(0xFF3480FF) else CourseColors.asColor(color)
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_colorize_24, selectedColor, onClick = onColorClick) {
+            Text("点此更改颜色", color = selectedColor, fontSize = 14.sp)
+        }
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_assistant_photo_24, WakeUpBlue, onClick = onCreditClick) {
+            Text(
+                if (credit.isBlank()) "学分（可不填）" else "$credit 学分",
+                color = if (credit.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                fontSize = 14.sp,
+            )
+        }
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_sticky_note_2_24, WakeUpYellow, onClick = onNoteClick) {
+            Text(
+                if (note.isBlank()) "备注（可不填）" else note,
+                color = if (note.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                fontSize = 14.sp,
+                maxLines = 1,
+            )
+        }
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = WakeUpEditorDivider)
+    }
+}
+
+@Composable
+private fun WakeUpEditorRow(
+    iconRes: Int,
+    iconTint: Color,
+    onClick: (() -> Unit)? = null,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(start = 0.dp, end = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painterResource(iconRes), contentDescription = null, tint = iconTint, modifier = Modifier.size(56.dp).padding(16.dp))
+        content()
     }
 }
 
@@ -1921,104 +2119,142 @@ private fun TimeDraftEditor(
     onChange: (TimeDraft) -> Unit,
     onRemove: () -> Unit,
     onTeacher: () -> Unit,
+    onRoom: () -> Unit,
     teacher: String,
     onCustomTimeInfo: () -> Unit,
 ) {
     val context = LocalContext.current
-    var pickerTarget by remember(draft.id, index) { mutableStateOf<PickerTarget?>(null) }
-    SettingsGroup("时间段 ${index + 1}") {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("上课安排", modifier = Modifier.weight(1f), color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = onRemove, enabled = true) { Icon(Icons.Default.Delete, contentDescription = null); Spacer(Modifier.width(3.dp)); Text("删除") }
+    var weekDialog by remember(draft.id, index) { mutableStateOf(false) }
+    var timeDialog by remember(draft.id, index) { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(modifier = Modifier.fillMaxWidth().height(43.dp)) {
+            Text("时间段", modifier = Modifier.padding(start = 16.dp, top = 24.dp), color = WakeUpEditorText, fontSize = 12.sp)
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp).size(32.dp),
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "删除时间段", tint = WakeUpEditorText, modifier = Modifier.size(20.dp))
+            }
         }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-        SettingRow(Icons.Default.CalendarMonth, "周数", selectedWeekLabel(draft.selectedWeeks, table.maxWeek), tint = Color(0xFF2AA69B))
-        WeekNumberGrid(maxWeek = table.maxWeek, selected = draft.selectedWeeks, onChange = { onChange(draft.copy(selectedWeeks = it)) })
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            WeekTypeButton("每周", draft.weekType == CourseTimeEntity.TYPE_ALL, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ALL, selectedWeeks = (1..table.maxWeek).toSet())) }, Modifier.weight(1f))
-            WeekTypeButton("单周", draft.weekType == CourseTimeEntity.TYPE_ODD, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ODD, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 1 }.toSet())) }, Modifier.weight(1f))
-            WeekTypeButton("双周", draft.weekType == CourseTimeEntity.TYPE_EVEN, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_EVEN, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 0 }.toSet())) }, Modifier.weight(1f))
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_today_24, WakeUpTeal, onClick = { weekDialog = true }) {
+            Text(selectedWeekLabel(draft.selectedWeeks, table.maxWeek), color = WakeUpEditorText, fontSize = 14.sp)
         }
-        SettingRow(
-            Icons.Default.CalendarMonth,
-            "星期",
-            "周${weekdayName(draft.day)}",
-            tint = Color(0xFF4E7BD9),
-            onClick = { pickerTarget = PickerTarget.DAY },
-        )
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-        SettingRow(
-            Icons.Default.List,
-            "开始节",
-            "第${draft.startNode}节",
-            tint = Color(0xFF4E7BD9),
-            onClick = { pickerTarget = PickerTarget.START_NODE },
-        )
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-        SettingRow(
-            Icons.Default.Tune,
-            "连续节数",
-            "${draft.step}节",
-            tint = Color(0xFF4E7BD9),
-            onClick = { pickerTarget = PickerTarget.STEP },
-        )
-        SettingRow(Icons.Default.AccessTime, "时间", timeSummary(draft, nodeTimes), tint = Color(0xFF4E7BD9))
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = draft.ownTime, onCheckedChange = {
-                if (it) onCustomTimeInfo()
-                onChange(draft.copy(ownTime = it))
-            })
-            Spacer(Modifier.width(8.dp))
-            Text("自定义时间", color = Color(0xFF141414), modifier = Modifier.weight(1f))
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_access_time_24, WakeUpOrange, onClick = { timeDialog = true }) {
+            Text(timeRowLabel(draft), color = WakeUpEditorText, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("自定义时间", color = if (draft.ownTime) WakeUpEditorText else WakeUpEditorHint, fontSize = 14.sp)
+                Checkbox(
+                    checked = draft.ownTime,
+                    onCheckedChange = {
+                        if (it) onCustomTimeInfo()
+                        onChange(draft.copy(ownTime = it))
+                    },
+                    modifier = Modifier.size(36.dp),
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = WakeUpTeal,
+                        uncheckedColor = Color(0xFF5C5962),
+                        checkmarkColor = Color.White,
+                    ),
+                )
+            }
         }
         if (draft.ownTime) {
-            Row(modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 24.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 104.dp, end = 24.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 OutlinedButton(onClick = { showTimePicker(context, draft.startTime, { onChange(draft.copy(startTime = it)) }) }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { "上课时间" }) }
                 OutlinedButton(onClick = { showTimePicker(context, draft.endTime, { onChange(draft.copy(endTime = it)) }) }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { "下课时间" }) }
             }
         }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-        SettingRow(Icons.Default.Person, "授课老师", teacher.ifBlank { "可不填" }, tint = Color(0xFF4E7BD9), onClick = onTeacher)
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-        SettingRow(Icons.Default.Place, "上课地点", draft.room.ifBlank { "可不填" }, tint = Color(0xFFE53935), onClick = { /* room is edited below */ })
-        OutlinedTextField(value = draft.room, onValueChange = { onChange(draft.copy(room = it)) }, modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 24.dp, bottom = 12.dp), label = { Text("上课地点（可不填）") }, singleLine = true)
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_person_24, WakeUpBlue, onClick = onTeacher) {
+            Text(
+                if (teacher.isBlank()) "授课老师（可不填）" else teacher,
+                color = if (teacher.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                fontSize = 14.sp,
+                maxLines = 1,
+            )
+        }
+        WakeUpEditorRow(R.drawable.sd_ic_twotone_meeting_room_24, WakeUpRed, onClick = onRoom) {
+            Text(
+                if (draft.room.isBlank()) "上课地点（可不填）" else draft.room,
+                color = if (draft.room.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                fontSize = 14.sp,
+                maxLines = 1,
+            )
+        }
     }
 
-    pickerTarget?.let { target ->
-        val maxNode = table.nodeCount.coerceIn(1, 60)
-        val options = when (target) {
-            PickerTarget.DAY -> (1..7).map { it to "周${weekdayName(it)}" }
-            PickerTarget.START_NODE -> (1..maxNode).map { it to "第${it}节" }
-            PickerTarget.STEP -> (1..(maxNode - draft.startNode + 1).coerceAtLeast(1)).map { it to "${it}节" }
-        }
-        val selected = when (target) {
-            PickerTarget.DAY -> draft.day
-            PickerTarget.START_NODE -> draft.startNode
-            PickerTarget.STEP -> draft.step.coerceIn(1, options.size)
-        }
-        ChoicePickerDialog(
-            title = when (target) {
-                PickerTarget.DAY -> "选择星期"
-                PickerTarget.START_NODE -> "选择开始节"
-                PickerTarget.STEP -> "选择连续节数"
+    if (weekDialog) {
+        AlertDialog(
+            onDismissRequest = { weekDialog = false },
+            title = { Text("选择周数") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WeekNumberGrid(maxWeek = table.maxWeek, selected = draft.selectedWeeks, onChange = { onChange(draft.copy(selectedWeeks = it)) })
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        WeekTypeButton("每周", draft.weekType == CourseTimeEntity.TYPE_ALL, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ALL, selectedWeeks = (1..table.maxWeek).toSet())) }, Modifier.weight(1f))
+                        WeekTypeButton("单周", draft.weekType == CourseTimeEntity.TYPE_ODD, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ODD, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 1 }.toSet())) }, Modifier.weight(1f))
+                        WeekTypeButton("双周", draft.weekType == CourseTimeEntity.TYPE_EVEN, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_EVEN, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 0 }.toSet())) }, Modifier.weight(1f))
+                    }
+                }
             },
-            options = options,
-            selectedValue = selected,
-            onSelect = { value ->
-                onChange(
-                    when (target) {
-                        PickerTarget.DAY -> draft.copy(day = value)
-                        PickerTarget.START_NODE -> draft.copy(
-                            startNode = value,
-                            step = draft.step.coerceAtMost((maxNode - value + 1).coerceAtLeast(1)),
-                        )
-                        PickerTarget.STEP -> draft.copy(step = value)
-                    },
-                )
-                pickerTarget = null
-            },
-            onDismiss = { pickerTarget = null },
+            confirmButton = { TextButton(onClick = { weekDialog = false }) { Text("完成") } },
         )
+    }
+    if (timeDialog) {
+        TimeSelectionDialog(
+            draft = draft,
+            maxNode = table.nodeCount.coerceIn(1, 60),
+            onChange = onChange,
+            onDismiss = { timeDialog = false },
+        )
+    }
+}
+
+private fun timeRowLabel(draft: TimeDraft): String =
+    "周${weekdayName(draft.day)}    第${draft.startNode} - ${draft.startNode + draft.step - 1}节"
+
+@Composable
+private fun TimeSelectionDialog(
+    draft: TimeDraft,
+    maxNode: Int,
+    onChange: (TimeDraft) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择上课时间") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TimeChoiceMenuRow("星期", "周${weekdayName(draft.day)}", (1..7).map { it to "周${weekdayName(it)}" }) { onChange(draft.copy(day = it)) }
+                TimeChoiceMenuRow("开始节", "第${draft.startNode}节", (1..maxNode).map { it to "第${it}节" }) { value -> onChange(draft.copy(startNode = value, step = draft.step.coerceAtMost((maxNode - value + 1).coerceAtLeast(1)))) }
+                TimeChoiceMenuRow("连续节数", "${draft.step}节", (1..(maxNode - draft.startNode + 1).coerceAtLeast(1)).map { it to "${it}节" }) { onChange(draft.copy(step = it)) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+    )
+}
+
+@Composable
+private fun TimeChoiceMenuRow(
+    label: String,
+    value: String,
+    options: List<Pair<Int, String>>,
+    onSelected: (Int) -> Unit,
+) {
+    var expanded by remember(label, value) { mutableStateOf(false) }
+    Row(modifier = Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = WakeUpEditorText, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Box {
+            TextButton(onClick = { expanded = true }) { Text(value, color = WakeUpTeal, fontSize = 14.sp) }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (optionValue, optionLabel) ->
+                    DropdownMenuItem(text = { Text(optionLabel) }, onClick = { onSelected(optionValue); expanded = false })
+                }
+            }
+        }
     }
 }
 
@@ -2433,7 +2669,7 @@ private fun NumberField(value: String, onValueChange: (String) -> Unit, label: S
     )
 }
 
-private fun defaultTimeDraft(maxWeek: Int, day: Int, startNode: Int, step: Int = 1) = TimeDraft(day = day.coerceIn(1, 7), startNode = startNode.coerceAtLeast(1), step = step.coerceAtLeast(1), selectedWeeks = (1..maxWeek.coerceAtLeast(1)).toSet())
+private fun defaultTimeDraft(maxWeek: Int, day: Int, startNode: Int, step: Int = 2) = TimeDraft(day = day.coerceIn(1, 7), startNode = startNode.coerceAtLeast(1), step = step.coerceAtLeast(1), selectedWeeks = (1..maxWeek.coerceAtLeast(1)).toSet())
 
 private fun selectedWeeks(time: CourseTimeEntity, maxWeek: Int): Set<Int> = (time.startWeek..time.endWeek).filter { week -> Weeks.inWeek(time.startWeek, time.endWeek, time.weekType, week) && week in 1..maxWeek }.toSet()
 
@@ -2469,9 +2705,17 @@ private fun timeSummary(draft: TimeDraft, nodeTimes: List<NodeTimeEntity>): Stri
 
 private fun selectedWeekLabel(selected: Set<Int>, maxWeek: Int): String {
     if (selected.isEmpty()) return "未选择"
-    if (selected.size == maxWeek) return "全周"
-    val values = selected.sorted()
-    return if (values.size <= 4) values.joinToString("、") { "第${it}周" } else "已选 ${values.size} 周"
+    val values = selected.filter { it in 1..maxWeek }.sorted()
+    if (values.isEmpty()) return "未选择"
+    if (values.size == maxWeek && values.first() == 1 && values.last() == maxWeek) return "第1 - ${maxWeek}周"
+    val contiguous = values.zipWithNext().all { (left, right) -> right == left + 1 }
+    return if (contiguous) {
+        "第${values.first()} - ${values.last()}周"
+    } else if (values.size <= 4) {
+        values.joinToString("、") { "第${it}周" }
+    } else {
+        "已选 ${values.size} 周"
+    }
 }
 
 private fun courseTimeLabel(time: CourseTimeEntity, nodeTimes: List<NodeTimeEntity>): String {
