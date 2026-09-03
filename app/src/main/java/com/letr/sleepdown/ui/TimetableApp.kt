@@ -1,11 +1,10 @@
 package com.letr.sleepdown.ui
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -19,7 +18,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +69,7 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
@@ -107,6 +106,10 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -143,6 +146,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -165,13 +169,16 @@ import com.letr.sleepdown.data.TableWithMeta
 import com.letr.sleepdown.data.TimetableRepository
 import com.letr.sleepdown.logic.CourseColors
 import com.letr.sleepdown.logic.Weeks
+import com.letr.sleepdown.widget.refreshScheduleWidgets
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
+import java.time.ZoneOffset
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -251,10 +258,26 @@ private enum class PickerTarget {
     STEP,
 }
 
+private data class TimePickerTarget(
+    val index: Int,
+    val isStart: Boolean,
+)
+
+private data class ImportNotice(
+    val title: String,
+    val message: String,
+    val onConfirm: () -> Unit,
+)
+
 @Composable
-fun TimetableApp(repository: TimetableRepository) {
+fun TimetableApp(
+    repository: TimetableRepository,
+    initialTableId: Long? = null,
+    initialImportUri: Uri? = null,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var externalImportUri by remember { mutableStateOf(initialImportUri) }
     val tables by repository.observeTables().collectAsStateWithLifecycle(initialValue = emptyList())
     var currentTableId by remember { mutableStateOf(AppContainer.currentTableId(context)) }
     var screen by remember { mutableStateOf(AppScreen.WEEK) }
@@ -272,6 +295,14 @@ fun TimetableApp(repository: TimetableRepository) {
         if (currentTableId <= 0L) {
             currentTableId = id
             AppContainer.setCurrentTableId(context, id)
+        }
+    }
+    LaunchedEffect(initialTableId, tables) {
+        val id = initialTableId
+        if (id != null && tables.any { it.id == id } && currentTableId != id) {
+            currentTableId = id
+            AppContainer.setCurrentTableId(context, id)
+            screen = AppScreen.WEEK
         }
     }
     LaunchedEffect(tables, currentTableId, selectLatestAfterImport) {
@@ -296,13 +327,26 @@ fun TimetableApp(repository: TimetableRepository) {
         repository.observeTableWithMeta(tableId)
     }.collectAsStateWithLifecycle(initialValue = null)
 
+    LaunchedEffect(initialImportUri) {
+        if (initialImportUri != null) {
+            externalImportUri = initialImportUri
+            importTableCountBefore = tables.size
+            screen = AppScreen.IMPORT
+        }
+    }
+    LaunchedEffect(tables, tableMeta) {
+        if (tables.isNotEmpty() && tableMeta != null) {
+            refreshScheduleWidgets(context)
+        }
+    }
+
     BackHandler(enabled = screen != AppScreen.WEEK) {
         screen = when (screen) {
             AppScreen.TABLE_MANAGE -> AppScreen.WEEK
-            AppScreen.TABLE_SETTINGS -> AppScreen.TABLE_MANAGE
-            AppScreen.APPEARANCE -> AppScreen.TABLE_SETTINGS
-            AppScreen.COURSE_MANAGE -> AppScreen.TABLE_MANAGE
-            AppScreen.COURSE_EDITOR -> AppScreen.COURSE_MANAGE
+            AppScreen.TABLE_SETTINGS,
+            AppScreen.APPEARANCE,
+            AppScreen.COURSE_MANAGE,
+            AppScreen.COURSE_EDITOR,
             AppScreen.TIME_TABLE,
             AppScreen.IMPORT,
             AppScreen.WIDGET_HELP -> AppScreen.WEEK
@@ -331,6 +375,7 @@ fun TimetableApp(repository: TimetableRepository) {
                 repository.saveNodeTimes(TimetableRepository.defaultNodeTimes(id))
             }
             selectTable(id)
+            showToast(context, "保存成功")
             screen = AppScreen.WEEK
         }
     }
@@ -369,6 +414,7 @@ fun TimetableApp(repository: TimetableRepository) {
                                         }
                                         context.startActivity(Intent.createChooser(intent, "分享课表备份"))
                                     }
+                                    .onFailure { error -> showToast(context, error.message ?: "导出失败") }
                                 }
                             },
                             onEditCourse = { course ->
@@ -379,26 +425,35 @@ fun TimetableApp(repository: TimetableRepository) {
                                 screen = AppScreen.COURSE_EDITOR
                             },
                             onDeleteCourse = { course ->
-                                scope.launch { repository.deleteCourse(course) }
+                                scope.launch {
+                                    repository.deleteCourse(course)
+                                    showToast(context, "删除成功")
+                                }
                             },
                             onCopyCourse = { course ->
                                 scope.launch {
                                     val copy = course.copy(id = 0L, name = "${course.name}（副本）")
                                     val times = repository.getCourseTimes(course.id).map { it.copy(id = 0L, courseId = 0L) }
                                     repository.saveCourse(table.id, copy, times)
+                                    showToast(context, "课程已复制")
                                 }
                             },
-                            onMoveCourse = { course, day, startNode ->
+                            onMoveCourse = { item, day, startNode ->
                                 scope.launch {
-                                    val times = repository.getCourseTimes(course.id).sortedBy { it.id }
-                                    val first = times.firstOrNull() ?: return@launch
-                                    val maxStart = (table.nodeCount - first.step + 1).coerceAtLeast(1)
-                                    val updated = times.toMutableList()
-                                    updated[0] = first.copy(
-                                        day = day,
-                                        startNode = startNode.coerceIn(1, maxStart),
-                                    )
-                                    repository.saveCourse(table.id, course, updated)
+                                    val times = repository.getCourseTimes(item.course.id)
+                                    val maxStart = (table.nodeCount - item.time.step + 1).coerceAtLeast(1)
+                                    val updated = times.map { time ->
+                                        if (time.id == item.time.id) {
+                                            time.copy(
+                                                day = day,
+                                                startNode = startNode.coerceIn(1, maxStart),
+                                            )
+                                        } else {
+                                            time
+                                        }
+                                    }
+                                    repository.saveCourse(table.id, item.course, updated)
+                                    showToast(context, "课程已移动")
                                 }
                             },
                         )
@@ -414,12 +469,21 @@ fun TimetableApp(repository: TimetableRepository) {
                 onAppearance = { tableDraft = null; editingTableId = it; selectTable(it); screen = AppScreen.APPEARANCE },
                 onCourses = { tableDraft = null; selectTable(it); screen = AppScreen.COURSE_MANAGE },
                 onCopy = { source ->
-                    scope.launch { selectTable(repository.copyTable(source.id)) }
+                    scope.launch {
+                        selectTable(repository.copyTable(source.id))
+                        showToast(context, "课表已复制")
+                    }
                 },
                 onDelete = { tableToDelete ->
                     scope.launch {
+                        val deletingCurrent = tableToDelete.id == currentTableId
                         repository.deleteTable(tableToDelete)
-                        if (tableToDelete.id == currentTableId) currentTableId = 0L
+                        if (deletingCurrent) {
+                            val replacement = tables.firstOrNull { it.id != tableToDelete.id }?.id ?: 0L
+                            currentTableId = replacement
+                            AppContainer.setCurrentTableId(context, replacement)
+                        }
+                        showToast(context, "删除成功")
                     }
                 },
                 onNew = { tableDraft = null; editingTableId = null; screen = AppScreen.TABLE_SETTINGS },
@@ -428,7 +492,7 @@ fun TimetableApp(repository: TimetableRepository) {
                 val editingTable = editingTableId?.let { id -> tables.firstOrNull { it.id == id } }
                 TableSettingsScreen(
                     table = tableDraft ?: editingTable,
-                    onBack = { screen = AppScreen.TABLE_MANAGE },
+                    onBack = { screen = AppScreen.WEEK },
                     onSave = ::saveTable,
                     onUpdate = updateTable,
                     currentWeek = (tableDraft ?: table)?.let { currentWeek(it) } ?: 1,
@@ -445,7 +509,7 @@ fun TimetableApp(repository: TimetableRepository) {
                     AppearanceScreen(
                         table = tableDraft ?: table,
                         meta = tableMeta!!,
-                        onBack = { screen = AppScreen.TABLE_SETTINGS },
+                        onBack = { screen = AppScreen.WEEK },
                         onSave = updateTable,
                     )
                 }
@@ -457,7 +521,7 @@ fun TimetableApp(repository: TimetableRepository) {
                     CourseManagementScreen(
                         table = tableDraft ?: table,
                         courses = tableMeta!!.courses,
-                        onBack = { screen = AppScreen.TABLE_MANAGE },
+                        onBack = { screen = AppScreen.WEEK },
                         onAdd = { openAddCourse() },
                         onEdit = { course ->
                             editingCourseId = course.id
@@ -466,8 +530,18 @@ fun TimetableApp(repository: TimetableRepository) {
                             editorStep = 1
                             screen = AppScreen.COURSE_EDITOR
                         },
-                        onDelete = { course -> scope.launch { repository.deleteCourse(course) } },
-                        onClear = { courses -> scope.launch { courses.forEach { repository.deleteCourse(it) } } },
+                        onDelete = { course ->
+                            scope.launch {
+                                repository.deleteCourse(course)
+                                showToast(context, "删除成功")
+                            }
+                        },
+                        onClear = { courses ->
+                            scope.launch {
+                                courses.forEach { repository.deleteCourse(it) }
+                                showToast(context, "课程已清空")
+                            }
+                        },
                     )
                 }
             }
@@ -481,7 +555,7 @@ fun TimetableApp(repository: TimetableRepository) {
                     initialStep = editorStep,
                     existingCourses = tableMeta?.courses.orEmpty(),
                     nodeTimes = tableMeta?.nodeTimes.orEmpty(),
-                    onBack = { screen = AppScreen.COURSE_MANAGE },
+                    onBack = { screen = AppScreen.WEEK },
                     onSaved = { screen = AppScreen.WEEK },
                 )
             }
@@ -501,6 +575,8 @@ fun TimetableApp(repository: TimetableRepository) {
             }
             AppScreen.IMPORT -> ImportScreen(
                 repository = repository,
+                initialUri = externalImportUri,
+                onInitialUriConsumed = { externalImportUri = null },
                 onBack = { screen = AppScreen.WEEK },
                 onJsonImported = { id -> selectTable(id); screen = AppScreen.WEEK },
                 onCsvImported = { selectLatestAfterImport = true; screen = AppScreen.WEEK },
@@ -529,7 +605,7 @@ private fun ScheduleScreen(
     onEditCourse: (CourseEntity) -> Unit,
     onDeleteCourse: (CourseEntity) -> Unit,
     onCopyCourse: (CourseEntity) -> Unit,
-    onMoveCourse: (CourseEntity, Int, Int) -> Unit,
+    onMoveCourse: (CourseItem, Int, Int) -> Unit,
 ) {
     val table = meta.table
     val current = currentWeek(table)
@@ -737,7 +813,7 @@ private fun SchedulePage(
     week: Int,
     currentWeek: Int,
     onAddCourse: (Int, Int, Int) -> Unit,
-    onMoveCourse: (CourseEntity, Int, Int) -> Unit,
+    onMoveCourse: (CourseItem, Int, Int) -> Unit,
     onOpenCourse: (CourseEntity) -> Unit,
 ) {
     val visibleDays = visibleDays(table)
@@ -790,11 +866,12 @@ private fun ScheduleGrid(
     items: List<CourseItem>,
     scrollState: androidx.compose.foundation.ScrollState,
     onAddCourse: (Int, Int, Int) -> Unit,
-    onMoveCourse: (CourseEntity, Int, Int) -> Unit,
+    onMoveCourse: (CourseItem, Int, Int) -> Unit,
     onOpenCourse: (CourseEntity) -> Unit,
 ) {
     val rowHeight = table.itemHeightDp.coerceIn(32, 128).dp + 2.dp
     val nodeCount = table.nodeCount.coerceIn(1, 60)
+    val contentHeight = rowHeight * nodeCount.toFloat()
     val dayToColumn = days.withIndex().associate { it.value to it.index }
     val currentItems = items.filter {
         it.time.day in dayToColumn &&
@@ -818,10 +895,16 @@ private fun ScheduleGrid(
     var selection by remember(week) { mutableStateOf<CellSelection?>(null) }
     var selectionAnchorNode by remember(week) { mutableStateOf<Int?>(null) }
     var selectionCursorNode by remember(week) { mutableStateOf<Int?>(null) }
+    var viewportHeightPx by remember { mutableIntStateOf(0) }
     val rowHeightPx = with(LocalDensity.current) { rowHeight.toPx() }
 
-    Row(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.weight(0.64f).verticalScroll(scrollState)) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { viewportHeightPx = it.height }
+            .verticalScroll(scrollState),
+    ) {
+        Column(modifier = Modifier.weight(0.64f).height(contentHeight)) {
             nodeTimes.take(nodeCount).forEach { node ->
                 Column(
                     modifier = Modifier.height(rowHeight),
@@ -836,9 +919,9 @@ private fun ScheduleGrid(
                 }
             }
         }
-        BoxWithConstraints(modifier = Modifier.weight(days.size.toFloat()).padding(end = if (days.size == 7) 4.dp else 8.dp).verticalScroll(scrollState)) {
+        BoxWithConstraints(modifier = Modifier.weight(days.size.toFloat()).height(contentHeight).padding(end = if (days.size == 7) 4.dp else 8.dp)) {
             val columnWidth = if (days.isEmpty()) 0.dp else maxWidth / days.size
-            Column(modifier = Modifier.height(rowHeight * nodeCount.toFloat())) {
+            Column(modifier = Modifier.height(contentHeight)) {
                 repeat(nodeCount) { row ->
                     Row(modifier = Modifier.height(rowHeight)) {
                         days.forEach { day ->
@@ -977,8 +1060,10 @@ private fun ScheduleGrid(
                     nodeTimes = nodeTimes,
                     rowHeight = rowHeight,
                     visibleDays = days,
+                    scrollState = scrollState,
+                    viewportHeightPx = viewportHeightPx,
                     onClick = { onOpenCourse(item.course) },
-                    onMove = { day, startNode -> onMoveCourse(item.course, day, startNode) },
+                    onMove = { day, startNode -> onMoveCourse(item, day, startNode) },
                 )
             }
             otherItems.filter { item ->
@@ -995,6 +1080,8 @@ private fun ScheduleGrid(
                     nodeTimes = nodeTimes,
                     rowHeight = rowHeight,
                     visibleDays = days,
+                    scrollState = scrollState,
+                    viewportHeightPx = viewportHeightPx,
                     onClick = { onOpenCourse(item.course) },
                     onMove = null,
                 )
@@ -1014,6 +1101,7 @@ private fun SelectionResizeHandle(
         contentDescription = "调整课程节数",
         modifier = modifier
             .size(width = 36.dp, height = 72.dp)
+            .zIndex(10f)
             .pointerInput(rowHeightPx) {
                 var dragPixels = 0f
                 detectDragGestures(
@@ -1044,6 +1132,8 @@ private fun CourseCard(
     nodeTimes: List<NodeTimeEntity>,
     rowHeight: Dp,
     visibleDays: List<Int>,
+    scrollState: androidx.compose.foundation.ScrollState,
+    viewportHeightPx: Int,
     onClick: () -> Unit,
     onMove: ((Int, Int) -> Unit)?,
 ) {
@@ -1079,9 +1169,13 @@ private fun CourseCard(
     var dragging by remember(time.id) { mutableStateOf(false) }
     var dragX by remember(time.id) { mutableFloatStateOf(0f) }
     var dragY by remember(time.id) { mutableFloatStateOf(0f) }
+    var dragStartScroll by remember(time.id) { mutableFloatStateOf(0f) }
+    var dragChanged by remember(time.id) { mutableStateOf(false) }
+    val dragScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val columnWidthPx = with(density) { columnWidth.toPx() }
     val rowHeightPx = with(density) { rowHeight.toPx() }
+    val cardHeightPx = rowHeightPx * step.toFloat()
 
     Box(
         modifier = Modifier
@@ -1090,35 +1184,75 @@ private fun CourseCard(
                 scaleX = if (dragging) 1.1f else 1f
                 scaleY = if (dragging) 1.1f else 1f
                 translationX = dragX
-                translationY = dragY
+                translationY = dragY + if (dragging) scrollState.value - dragStartScroll else 0f
             }
             .zIndex(if (dragging) 1f else 0f)
-            .then(if (onMove == null) Modifier else Modifier.pointerInput(time.id, columnWidthPx, rowHeightPx) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = {
-                        dragX = 0f
-                        dragY = 0f
-                        dragging = true
-                    },
-                    onDragEnd = {
-                        val targetColumn = (column + (dragX / columnWidthPx).roundToInt()).coerceIn(0, visibleDays.lastIndex)
-                        val targetNode = (time.startNode + (dragY / rowHeightPx).roundToInt()).coerceIn(1, table.nodeCount)
-                        onMove(visibleDays[targetColumn], targetNode)
-                        dragX = 0f
-                        dragY = 0f
-                        dragging = false
-                    },
-                    onDragCancel = {
-                        dragX = 0f
-                        dragY = 0f
-                        dragging = false
-                    },
-                    onDrag = { change, amount ->
+            .then(if (onMove == null) Modifier else Modifier.pointerInput(time.id, columnWidthPx, rowHeightPx, table.nodeCount, visibleDays.size, viewportHeightPx) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val holdResult = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: return@withTimeoutOrNull false
+                            if (!change.pressed) return@withTimeoutOrNull false
+                            val deltaX = change.position.x - down.position.x
+                            val deltaY = change.position.y - down.position.y
+                            if (abs(deltaX) > viewConfiguration.touchSlop || abs(deltaY) > viewConfiguration.touchSlop) {
+                                return@withTimeoutOrNull false
+                            }
+                        }
+                    }
+                    if (holdResult != null) return@awaitEachGesture
+
+                    down.consume()
+                    dragX = 0f
+                    dragY = 0f
+                    dragStartScroll = scrollState.value.toFloat()
+                    dragChanged = false
+                    dragging = true
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                            ?: break
+                        if (!change.pressed) break
                         change.consume()
-                        dragX += amount.x
-                        dragY += amount.y
-                    },
-                )
+                        val delta = change.position - change.previousPosition
+                        dragX += delta.x
+                        dragY += delta.y
+                        if (delta.x != 0f || delta.y != 0f) dragChanged = true
+                        if (viewportHeightPx > 0 && scrollState.maxValue > 0) {
+                            val scrollDelta = scrollState.value - dragStartScroll
+                            val contentTop = rowHeightPx * (time.startNode - 1) + dragY + scrollDelta
+                            val contentBottom = contentTop + cardHeightPx
+                            val edge = with(density) { 48.dp.toPx() }
+                            val viewportTop = scrollState.value.toFloat()
+                            val viewportBottom = viewportTop + viewportHeightPx
+                            val targetScroll = when {
+                                contentTop < viewportTop + edge -> (scrollState.value - 24).coerceAtLeast(0)
+                                contentBottom > viewportBottom - edge -> (scrollState.value + 24).coerceAtMost(scrollState.maxValue)
+                                else -> null
+                            }
+                            if (targetScroll != null && targetScroll != scrollState.value) {
+                                dragScope.launch { scrollState.animateScrollTo(targetScroll) }
+                            }
+                        }
+                    }
+
+                    val targetColumn = (column + (dragX / columnWidthPx).roundToInt())
+                        .coerceIn(0, visibleDays.lastIndex)
+                    val maxStart = (table.nodeCount - step + 1).coerceAtLeast(1)
+                    val targetNode = (time.startNode + ((dragY + (scrollState.value - dragStartScroll)) / rowHeightPx).roundToInt())
+                        .coerceIn(1, maxStart)
+                    if (dragChanged && (targetColumn != column || targetNode != time.startNode)) {
+                        onMove(visibleDays[targetColumn], targetNode)
+                    }
+                    dragX = 0f
+                    dragY = 0f
+                    dragStartScroll = 0f
+                    dragChanged = false
+                    dragging = false
+                }
             })
             .width((columnWidth - 2.dp).coerceAtLeast(1.dp))
             .height((table.itemHeightDp.coerceIn(32, 128).dp * step.toFloat()) + (2.dp * (step - 1).toFloat()) - 2.dp)
@@ -1290,14 +1424,13 @@ private fun SettingsGroup(
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text(title, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp), color = Color(0xFF626466), fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-            Column(content = content)
-        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White),
+            content = content,
+        )
     }
 }
 
@@ -1343,7 +1476,6 @@ private fun TableManagementScreen(
     var sortByName by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<TableEntity?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
     val displayTables = if (sortByName) tables.sortedBy { it.name } else tables
 
     ScreenScaffold(
@@ -1370,13 +1502,13 @@ private fun TableManagementScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     item {
-                        Text("点击卡片查看该课表的课程\n长按拖动排序", modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), color = Color(0xFF626466), fontSize = 12.sp, lineHeight = 18.sp)
+                        Text("点击卡片切换当前课表\n长按拖动排序，使用下方按钮管理", modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), color = Color(0xFF626466), fontSize = 12.sp, lineHeight = 18.sp)
                     }
                     items(displayTables, key = { it.id }) { table ->
                         TableCard(
                             table = table,
                             selected = table.id == currentTableId,
-                            onClick = { onCourses(table.id) },
+                            onClick = { onSelect(table.id) },
                             onCourses = { onCourses(table.id) },
                             onSettings = { onEditSettings(table.id) },
                             onAppearance = { onAppearance(table.id) },
@@ -1389,22 +1521,19 @@ private fun TableManagementScreen(
             FloatingActionButton(onClick = onNew, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp), containerColor = Color(0xFFFF2D55), contentColor = Color.White) {
                 Icon(Icons.Default.Add, contentDescription = "新建课表")
             }
-            message?.let { text ->
-                Text(text, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp), color = Color(0xFFFF2D55), fontSize = 13.sp)
-            }
         }
     }
     deleting?.let { table ->
-        if (table.id == currentTableId) {
+        if (tables.size <= 1) {
             AlertDialog(
                 onDismissRequest = { deleting = null },
                 title = { Text("无法删除") },
-                text = { Text("当前显示的课表无法删除，请回主界面切换到其他课表后再删除") },
+                text = { Text("至少保留一张课表。请先新建另一张课表，再删除当前课表。") },
                 confirmButton = { TextButton(onClick = { deleting = null }) { Text("知道了") } },
             )
         } else {
             ConfirmDialog(
-                title = "删除课表",
+                title = "提示",
                 text = "确定要删除课表「${table.name}」吗？此操作不可撤销。",
                 onConfirm = { deleting = null; onDelete(table) },
                 onDismiss = { deleting = null },
@@ -1479,10 +1608,10 @@ private fun TableSettingsScreen(
         TableEntity(name = "我的课表", startDate = LocalDate.now().with(java.time.DayOfWeek.MONDAY).toEpochDay())
     }
     var working by remember(table) { mutableStateOf(table ?: defaultTable) }
+    val context = LocalContext.current
     var nameDialog by remember { mutableStateOf(false) }
     var numberDialog by remember { mutableStateOf<String?>(null) }
     var dateDialog by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
 
     fun persistWorking() {
         if (table != null && working.name.isNotBlank()) onUpdate(working)
@@ -1496,7 +1625,11 @@ private fun TableSettingsScreen(
         },
         actions = {
             IconButton(onClick = {
-                if (working.name.isBlank()) error = "名称不能为空哦>_<" else onSave(working)
+                if (working.name.isBlank()) {
+                    Toast.makeText(context, "名称不能为空哦>_<", Toast.LENGTH_SHORT).show()
+                } else {
+                    onSave(working)
+                }
             }) { Icon(Icons.Default.Save, contentDescription = "保存") }
         },
     ) { padding ->
@@ -1570,22 +1703,34 @@ private fun TableSettingsScreen(
                     })
                 }
             }
-            item { error?.let { Text(it, modifier = Modifier.padding(horizontal = 24.dp), color = Color(0xFFD32F2F), fontSize = 13.sp) } }
         }
     }
 
     if (nameDialog) {
-        TextInputDialog("课表名称", working.name, onConfirm = { value -> working = working.copy(name = value); nameDialog = false }, onDismiss = { nameDialog = false })
+        TextInputDialog(
+            title = "课表名称",
+            initial = working.name,
+            validation = { value -> if (value.isBlank()) "名称不能为空哦>_<" else null },
+            onConfirm = { value -> working = working.copy(name = value.trim()); nameDialog = false },
+            onDismiss = { nameDialog = false },
+        )
     }
     numberDialog?.let { field ->
         val initial = if (field == "nodeCount") working.nodeCount.toString() else working.maxWeek.toString()
-        TextInputDialog(if (field == "nodeCount") "一天课程节数" else "学期周数", initial, number = true, onConfirm = { value ->
+        TextInputDialog(
+            title = if (field == "nodeCount") "一天课程节数" else "学期周数",
+            initial = initial,
+            number = true,
+            validation = { value -> if (value.toIntOrNull() == null) "请输入有效数字" else null },
+            onConfirm = { value ->
             val number = value.toIntOrNull()
             if (number != null) {
                 working = if (field == "nodeCount") working.copy(nodeCount = number.coerceIn(1, 60)) else working.copy(maxWeek = number.coerceIn(1, 60))
             }
-            numberDialog = null
-        }, onDismiss = { numberDialog = null })
+                numberDialog = null
+            },
+            onDismiss = { numberDialog = null },
+        )
     }
     if (dateDialog) {
         DatePickerDialogFor(working.startDate, onSelected = { date -> working = working.copy(startDate = date.toEpochDay()); dateDialog = false }, onDismiss = { dateDialog = false })
@@ -1616,9 +1761,15 @@ private fun AppearanceScreen(
         title = "课表外观",
         onBack = {
             onSave(working)
+            showToast(context, "保存成功")
             onBack()
         },
-        actions = { IconButton(onClick = { onSave(working) }) { Icon(Icons.Default.Save, contentDescription = "保存") } },
+        actions = {
+            IconButton(onClick = {
+                onSave(working)
+                showToast(context, "保存成功")
+            }) { Icon(Icons.Default.Save, contentDescription = "保存") }
+        },
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
@@ -1832,7 +1983,7 @@ private fun CourseManagementScreen(
         }
     }
     if (clearDialog) {
-        ConfirmDialog(title = "清空课程", text = "真的要清空课表吗？这将无法恢复。", onConfirm = { clearDialog = false; onClear(courses) }, onDismiss = { clearDialog = false })
+        ConfirmDialog(title = "提示", text = "真的要清空课表吗？这将无法恢复。", onConfirm = { clearDialog = false; onClear(courses) }, onDismiss = { clearDialog = false })
     }
     deleteCourse?.let { course ->
         ConfirmDialog(title = "提示", text = "确定要删除该课程吗？它的所有时间段都将会被删除。", onConfirm = { deleteCourse = null; onDelete(course) }, onDismiss = { deleteCourse = null })
@@ -1854,6 +2005,7 @@ private fun CourseEditorScreen(
     onSaved: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var name by remember(courseId, table.id) { mutableStateOf("") }
     var teacher by remember(courseId, table.id) { mutableStateOf("") }
     var note by remember(courseId, table.id) { mutableStateOf("") }
@@ -1907,9 +2059,18 @@ private fun CourseEditorScreen(
 
     fun save() {
         when {
-            name.isBlank() -> error = "请填写课程名称"
-            drafts.isEmpty() -> error = "请至少添加一个时间段"
-            drafts.any { it.selectedWeeks.isEmpty() } -> error = "请至少选择一周"
+            name.isBlank() -> {
+                error = "请填写课程名称"
+                showToast(context, "请填写课程名称")
+            }
+            drafts.isEmpty() -> {
+                error = "请至少添加一个时间段"
+                showToast(context, "请至少添加一个时间段")
+            }
+            drafts.any { it.selectedWeeks.isEmpty() } -> {
+                error = "请至少选择一周"
+                showToast(context, "请至少选择一周")
+            }
             else -> scope.launch {
                 val entity = CourseEntity(
                     id = courseId ?: 0L,
@@ -1921,6 +2082,7 @@ private fun CourseEditorScreen(
                     credit = credit.toFloatOrNull() ?: 0f,
                 )
                 repository.saveCourse(table.id, entity, drafts.flatMap { it.toEntities(entity.id) })
+                showToast(context, "保存成功")
                 onSaved()
             }
         }
@@ -2123,9 +2285,9 @@ private fun TimeDraftEditor(
     teacher: String,
     onCustomTimeInfo: () -> Unit,
 ) {
-    val context = LocalContext.current
     var weekDialog by remember(draft.id, index) { mutableStateOf(false) }
     var timeDialog by remember(draft.id, index) { mutableStateOf(false) }
+    var customTimeField by remember(draft.id, index) { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(modifier = Modifier.fillMaxWidth().height(43.dp)) {
@@ -2164,8 +2326,8 @@ private fun TimeDraftEditor(
                 modifier = Modifier.fillMaxWidth().padding(start = 104.dp, end = 24.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = { showTimePicker(context, draft.startTime, { onChange(draft.copy(startTime = it)) }) }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { "上课时间" }) }
-                OutlinedButton(onClick = { showTimePicker(context, draft.endTime, { onChange(draft.copy(endTime = it)) }) }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { "下课时间" }) }
+                OutlinedButton(onClick = { customTimeField = "start" }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { "上课时间" }) }
+                OutlinedButton(onClick = { customTimeField = "end" }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { "下课时间" }) }
             }
         }
         WakeUpEditorRow(R.drawable.sd_ic_twotone_person_24, WakeUpBlue, onClick = onTeacher) {
@@ -2209,6 +2371,16 @@ private fun TimeDraftEditor(
             maxNode = table.nodeCount.coerceIn(1, 60),
             onChange = onChange,
             onDismiss = { timeDialog = false },
+        )
+    }
+    customTimeField?.let { field ->
+        TimePickerDialogFor(
+            value = if (field == "start") draft.startTime else draft.endTime,
+            onSelected = { value ->
+                onChange(if (field == "start") draft.copy(startTime = value) else draft.copy(endTime = value))
+                customTimeField = null
+            },
+            onDismiss = { customTimeField = null },
         )
     }
 }
@@ -2325,8 +2497,8 @@ private fun TimeSettingsScreen(
     onBack: () -> Unit,
     onCopy: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val rows = remember(table.id) { mutableStateListOf<NodeDraft>() }
     var loaded by remember(table.id) { mutableStateOf(false) }
     var uniform by remember(table.id) { mutableStateOf(false) }
@@ -2335,7 +2507,7 @@ private fun TimeSettingsScreen(
     var deleting by remember { mutableStateOf<NodeDraft?>(null) }
     var uniformConfirm by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    var saved by remember { mutableStateOf(false) }
+    var timePickerTarget by remember(table.id) { mutableStateOf<TimePickerTarget?>(null) }
 
     LaunchedEffect(table.id) {
         rows.clear()
@@ -2360,7 +2532,7 @@ private fun TimeSettingsScreen(
                         menu = false
                         scope.launch {
                             repository.saveNodeTimes(table.id, rows.map { NodeTimeEntity(it.id, table.id, it.node, it.start, it.end) })
-                            saved = true
+                            showToast(context, "保存成功")
                         }
                     })
                 }
@@ -2368,7 +2540,7 @@ private fun TimeSettingsScreen(
             IconButton(onClick = {
                 scope.launch {
                     repository.saveNodeTimes(table.id, rows.map { NodeTimeEntity(it.id, table.id, it.node, it.start, effectiveEnd(it.start, it.end, uniform, duration)) })
-                    saved = true
+                    showToast(context, "保存成功")
                 }
             }) { Icon(Icons.Default.Save, contentDescription = "保存") }
         },
@@ -2400,24 +2572,31 @@ private fun TimeSettingsScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${row.node}", modifier = Modifier.width(32.dp), fontWeight = FontWeight.Bold, color = Color(0xFF141414))
-                        OutlinedButton(onClick = { showTimePicker(context, row.start) { value -> rows[index] = row.copy(start = value, end = if (uniform) addMinutes(value, duration.toIntOrNull() ?: 50) else row.end); saved = false } }, modifier = Modifier.weight(1f)) { Text(row.start) }
+                        OutlinedButton(onClick = { timePickerTarget = TimePickerTarget(index, isStart = true) }, modifier = Modifier.weight(1f)) { Text(row.start) }
                         Spacer(Modifier.width(8.dp))
-                        OutlinedButton(onClick = { showTimePicker(context, row.end) { value -> rows[index] = row.copy(end = value); saved = false } }, modifier = Modifier.weight(1f)) { Text(row.end) }
+                        OutlinedButton(onClick = { timePickerTarget = TimePickerTarget(index, isStart = false) }, modifier = Modifier.weight(1f)) { Text(row.end) }
                         IconButton(onClick = { if (rows.size > 1) deleting = row }) { Icon(Icons.Default.Delete, contentDescription = "删除第${row.node}节", tint = if (rows.size > 1) Color(0xFFE53935) else Color.LightGray) }
                     }
                 }
             }
-            item { if (saved) Text("已保存", modifier = Modifier.padding(horizontal = 24.dp), color = Color(0xFF2AA69B), fontSize = 13.sp) }
         }
     }
     if (addDialog) {
-        TextInputDialog("添加节次 / 统一课时长度", if (uniform) duration else "1", number = true, onConfirm = { value ->
+        TextInputDialog(
+            title = "添加节次 / 统一课时长度",
+            initial = if (uniform) duration else "1",
+            number = true,
+            validation = { value -> if (value.toIntOrNull() == null) "请输入有效数字" else null },
+            onConfirm = { value ->
             if (uniform) duration = value.toIntOrNull()?.coerceIn(10, 180)?.toString() ?: duration
             else {
                 scope.launch {
                     if (rows.size < TimetableRepository.MAX_NODE_COUNT) {
                         val node = repository.addNode(table.id)
                         rows += NodeDraft(node.id, node.node, node.start, node.end)
+                        showToast(context, "已添加第${node.node}节")
+                    } else {
+                        showToast(context, "最多支持 ${TimetableRepository.MAX_NODE_COUNT} 节")
                     }
                 }
             }
@@ -2435,14 +2614,36 @@ private fun TimeSettingsScreen(
                 val refreshed = nodeTimesFor(table, repository.getNodeTimes(table.id))
                 rows.clear()
                 rows.addAll(refreshed.map { NodeDraft(it.id, it.node, it.start, it.end) })
+                showToast(context, "删除成功")
             }
         }, onDismiss = { deleting = null })
+    }
+    timePickerTarget?.let { target ->
+        val row = rows.getOrNull(target.index)
+        if (row != null) {
+            TimePickerDialogFor(
+                value = if (target.isStart) row.start else row.end,
+                onSelected = { value ->
+                    rows[target.index] = if (target.isStart) {
+                        row.copy(start = value, end = if (uniform) addMinutes(value, duration.toIntOrNull() ?: 50) else row.end)
+                    } else {
+                        row.copy(end = value)
+                    }
+                    timePickerTarget = null
+                },
+                onDismiss = { timePickerTarget = null },
+            )
+        } else {
+            timePickerTarget = null
+        }
     }
 }
 
 @Composable
 private fun ImportScreen(
     repository: TimetableRepository,
+    initialUri: Uri? = null,
+    onInitialUriConsumed: () -> Unit = {},
     onBack: () -> Unit,
     onJsonImported: (Long) -> Unit,
     onCsvImported: () -> Unit,
@@ -2453,9 +2654,16 @@ private fun ImportScreen(
     var tableName by remember { mutableStateOf("导入课表") }
     var startDate by remember { mutableStateOf(LocalDate.now().with(java.time.DayOfWeek.MONDAY).toString()) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<ImportNotice?>(null) }
     var loading by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { pendingUri = it }
+
+    LaunchedEffect(initialUri) {
+        if (initialUri != null) {
+            pendingUri = initialUri
+            onInitialUriConsumed()
+        }
+    }
 
     LaunchedEffect(pendingUri, type) {
         val uri = pendingUri ?: return@LaunchedEffect
@@ -2463,7 +2671,7 @@ private fun ImportScreen(
         val text = runCatching {
             context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: error("无法读取文件")
         }.getOrElse {
-            message = it.message ?: "读取文件失败"
+            notice = ImportNotice("导入失败", it.message ?: "读取文件失败") {}
             return@LaunchedEffect
         }
         loading = true
@@ -2471,16 +2679,24 @@ private fun ImportScreen(
             if (type == "CSV") {
                 val date = Weeks.parseDate(startDate)
                 if (date == null) {
-                    message = "日期格式应为 yyyy-MM-dd"
+                    notice = ImportNotice("导入失败", "日期格式应为 yyyy-MM-dd") {}
                 } else {
                     repository.importCsv(tableName.ifBlank { "导入课表" }, date.toEpochDay(), text)
-                        .onSuccess { count -> message = "已导入 $count 条课程记录"; onCsvImported() }
-                        .onFailure { message = it.message ?: "CSV 导入失败" }
+                        .onSuccess { count ->
+                            notice = ImportNotice("导入成功", "已导入 $count 条课程记录") { onCsvImported() }
+                        }
+                        .onFailure { error ->
+                            notice = ImportNotice("导入失败", error.message ?: "CSV 导入失败") {}
+                        }
                 }
             } else {
                 repository.importBackup(text)
-                    .onSuccess { id -> message = "JSON 导入成功"; onJsonImported(id) }
-                    .onFailure { message = it.message ?: "JSON 导入失败" }
+                    .onSuccess { id ->
+                        notice = ImportNotice("导入成功", "JSON 课表已导入") { onJsonImported(id) }
+                    }
+                    .onFailure { error ->
+                        notice = ImportNotice("导入失败", error.message ?: "JSON 导入失败") {}
+                    }
             }
             loading = false
         }
@@ -2517,40 +2733,66 @@ private fun ImportScreen(
                     Text(if (loading) "正在导入…" else "选择文件")
                 }
             }
-            item { message?.let { Text(it, color = if (it.contains("失败") || it.contains("格式")) Color(0xFFD32F2F) else Color(0xFF2AA69B), fontSize = 13.sp) } }
         }
+    }
+    notice?.let { current ->
+        AlertDialog(
+            onDismissRequest = { notice = null },
+            title = { Text(current.title) },
+            text = { Text(current.message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    notice = null
+                    current.onConfirm()
+                }) { Text("知道了") }
+            },
+        )
     }
 }
 
 @Composable
 private fun WidgetHelpScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    var pinMessage by remember { mutableStateOf<String?>(null) }
+    val requestPin = { receiver: Class<*> ->
+        val manager = AppWidgetManager.getInstance(context)
+        if (manager.isRequestPinAppWidgetSupported) {
+            manager.requestPinAppWidget(ComponentName(context, receiver), null, null)
+            pinMessage = "请在桌面确认添加；系统会在添加时打开配置页。"
+        } else {
+            pinMessage = "当前桌面不支持从应用内添加，请从桌面小工具列表中选择 SleepDown。"
+        }
+    }
+
     ScreenScaffold(title = "桌面小部件", onBack = onBack) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 item {
                     SettingsGroup("添加小部件") {
-                        SettingRow(Icons.Default.Widgets, "将课表添加到桌面", "有日视图和周视图可选哦，能否添加成功取决于系统，如果添加不了可以看下方的教程。添加成功后，可以左右滑动桌面看看系统把课表放到哪一页了。", tint = Color(0xFF4E7BD9), onClick = {
-                            val manager = AppWidgetManager.getInstance(context)
-                            val provider = ComponentName(context, com.letr.sleepdown.widget.ScheduleWidgetReceiver::class.java)
-                            if (manager.isRequestPinAppWidgetSupported) {
-                                manager.requestPinAppWidget(provider, null, null)
-                            }
-                        })
+                        SettingRow(Icons.Default.Today, "今日课程（紧凑）", "按时间顺序显示今天的课程，适合较小的桌面区域。", tint = Color(0xFF4E7BD9), onClick = { requestPin(com.letr.sleepdown.widget.ScheduleWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
+                        SettingRow(Icons.Default.List, "今日课程", "按时间顺序显示今天的课程，并显示时间、地点和老师。", tint = Color(0xFF2AA69B), onClick = { requestPin(com.letr.sleepdown.widget.TodayCourseWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
+                        SettingRow(Icons.Default.Widgets, "今日课程（宽屏）", "在较宽的小部件中显示更多今日课程。", tint = Color(0xFF8D62C8), onClick = { requestPin(com.letr.sleepdown.widget.TodayModernWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
+                        SettingRow(Icons.Default.DateRange, "今日和明日", "同时显示今天与明天的课程。", tint = Color(0xFFFF8A00), onClick = { requestPin(com.letr.sleepdown.widget.TodayAndNextDayWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
+                        SettingRow(Icons.Default.TableView, "周课表", "按星期分栏显示当前周课程。", tint = Color(0xFFE53935), onClick = { requestPin(com.letr.sleepdown.widget.WeekScheduleWidgetReceiver::class.java) })
                     }
+                }
+                pinMessage?.let { message ->
+                    item { Text(message, modifier = Modifier.padding(horizontal = 24.dp), color = Color(0xFF2AA69B), fontSize = 12.sp) }
                 }
             }
             item {
                 SettingsGroup("使用说明") {
-                    SettingRow(Icons.Default.HelpOutline, "如何添加小部件？", "长按桌面空白处，或者在桌面做双指捏合手势，选择桌面小工具，肯定是有的，仔细找找，实在找不到就重启手机再找。请允许应用后台自启和后台运行。", tint = Color(0xFF2AA69B))
+                    SettingRow(Icons.Default.HelpOutline, "如何添加小部件？", "长按桌面空白处，选择小部件，找到 SleepDown 后添加。添加过程中会选择要显示的课表。", tint = Color(0xFF2AA69B))
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Tune, "如何调整小部件大小？", "桌面长按小部件调整。MIUI 长按后晃动小部件可以调整小部件大小；华为/荣耀设备可能因第三方主题无法调整。", tint = Color(0xFF8D62C8))
+                    SettingRow(Icons.Default.Tune, "如何调整小部件大小？", "长按桌面上的小部件后拖动边缘调整大小，具体操作取决于桌面应用。", tint = Color(0xFF8D62C8))
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "如何调整小部件样式？", "小部件右上角有个「调整」的按钮，点它就可以了。", tint = Color(0xFFFF8A00))
+                    SettingRow(Icons.Default.Palette, "如何更换显示的课表？", "删除后重新添加小部件，并在配置页面选择另一张课表。", tint = Color(0xFFFF8A00))
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Refresh, "小部件刷新不及时/显示正在加载", "请允许后台自启和后台运行。华为/荣耀路径：手机管家 -> 应用启动管理 -> WakeUp课程表 -> 手动管理。小部件右上角小箭头点击两次可强制刷新。", tint = Color(0xFF4E7BD9))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.HelpOutline, "更多问题", "根据反馈不定时更新", tint = Color(0xFF626466), onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wakeup.fun/doc/faqs.html"))) })
+                    SettingRow(Icons.Default.Refresh, "小部件什么时候更新？", "修改课程、课表或时间表后会刷新已添加的小部件；系统也会定期检查，桌面应用可能有额外的刷新限制。", tint = Color(0xFF4E7BD9))
                 }
             }
         }
@@ -2581,25 +2823,36 @@ private fun TextInputDialog(
     number: Boolean = false,
     multiline: Boolean = false,
     clearable: Boolean = false,
+    validation: (String) -> String? = { null },
     onConfirm: (String) -> Unit,
     onClear: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var value by remember(title, initial) { mutableStateOf(initial) }
+    var validationError by remember(title, initial) { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             OutlinedTextField(
                 value = value,
-                onValueChange = { value = it },
+                onValueChange = {
+                    value = it
+                    validationError = null
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = !multiline,
                 minLines = if (multiline) 3 else 1,
+                isError = validationError != null,
+                supportingText = validationError?.let { error -> { Text(error) } },
                 keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Decimal else KeyboardType.Text),
             )
         },
-        confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("确定") } },
+        confirmButton = {
+            TextButton(onClick = {
+                validation(value)?.let { validationError = it } ?: onConfirm(value)
+            }) { Text("确定") }
+        },
         dismissButton = {
             Row {
                 if (clearable && onClear != null) TextButton(onClick = onClear) { Text("清除") }
@@ -2641,18 +2894,49 @@ private fun ConfirmDialog(title: String, text: String, onConfirm: () -> Unit, on
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) }, confirmButton = { TextButton(onClick = onConfirm) { Text("确定") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DatePickerDialogFor(value: Long, onSelected: (LocalDate) -> Unit, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    LaunchedEffect(value) {
-        val date = LocalDate.ofEpochDay(value)
-        DatePickerDialog(context, { _, year, month, day -> onSelected(LocalDate.of(year, month + 1, day)) }, date.year, date.monthValue - 1, date.dayOfMonth).apply { setOnCancelListener { onDismiss() }; show() }
-    }
+    val initialMillis = LocalDate.ofEpochDay(value)
+        .atStartOfDay(ZoneOffset.UTC)
+        .toInstant()
+        .toEpochMilli()
+    val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择日期") },
+        text = { DatePicker(state = state) },
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { millis ->
+                    onSelected(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate())
+                } ?: onDismiss()
+            }) { Text("确定") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
-private fun showTimePicker(context: Context, value: String, onSelected: (String) -> Unit) {
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerDialogFor(value: String, onSelected: (String) -> Unit, onDismiss: () -> Unit) {
     val parsed = parseTime(value)
-    TimePickerDialog(context, { _, hour, minute -> onSelected("%02d:%02d".format(Locale.US, hour, minute)) }, parsed.hour, parsed.minute, true).show()
+    val state = rememberTimePickerState(
+        initialHour = parsed.hour,
+        initialMinute = parsed.minute,
+        is24Hour = true,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择时间") },
+        text = { TimePicker(state = state) },
+        confirmButton = {
+            TextButton(onClick = {
+                onSelected("%02d:%02d".format(Locale.US, state.hour, state.minute))
+            }) { Text("确定") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -2667,6 +2951,10 @@ private fun NumberField(value: String, onValueChange: (String) -> Unit, label: S
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number),
     )
+}
+
+private fun showToast(context: Context, message: String) {
+    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 
 private fun defaultTimeDraft(maxWeek: Int, day: Int, startNode: Int, step: Int = 2) = TimeDraft(day = day.coerceIn(1, 7), startNode = startNode.coerceAtLeast(1), step = step.coerceAtLeast(1), selectedWeeks = (1..maxWeek.coerceAtLeast(1)).toSet())

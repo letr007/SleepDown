@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SleepDown</string>
+    <string name="import_csv_label">使用 SleepDown 打开 CSV</string>
+    <string name="widget_today_label">今日课程</string>
+    <string name="widget_today_compact_label">今日课程（紧凑）</string>
+    <string name="widget_today_wide_label">今日课程（宽屏）</string>
+    <string name="widget_today_next_label">今日和明日</string>
+    <string name="widget_week_label">周课表</string>
+    <string name="widget_today_description">按时间顺序显示今天的课程</string>
+    <string name="widget_today_next_description">同时显示今天和明天的课程</string>
+    <string name="widget_week_description">按星期分栏显示当前周课程</string>
 </resources>
