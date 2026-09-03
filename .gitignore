@@ -1,0 +1,16 @@
+# Gradle and Kotlin build output
+.gradle/
+.kotlin/
+**/build/
+
+# Local machine configuration
+local.properties
+
+# IDE and OS files
+.idea/
+*.iml
+.DS_Store
+
+# Generated Xcode data
+xcuserdata/
+*.xcuserstate
