@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/widget_background"
+    android:padding="12dp" android:orientation="vertical">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_preview_table_week" android:textSize="11sp" android:textStyle="bold" android:textColor="#202124" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+        <TextView android:layout_width="24dp" android:layout_height="wrap_content" android:text="9" android:textColor="#202124" android:textSize="11sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_monday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_tuesday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_wednesday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_thursday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_friday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_saturday" android:textColor="#707073" android:textSize="9sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/widget_weekday_sunday" android:textColor="#707073" android:textSize="9sp" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+        <TextView android:layout_width="24dp" android:layout_height="64dp" android:text="1\n08:00\n08:50" android:textColor="#202124" android:textSize="8sp" />
+        <TextView android:layout_width="0dp" android:layout_height="64dp" android:layout_weight="1" android:layout_marginEnd="1dp" android:background="@drawable/widget_course_background" android:backgroundTint="#82B4DC" android:padding="3dp" android:text="@string/widget_preview_math" android:textColor="#FFFFFF" android:textSize="11sp" android:textStyle="bold" />
+        <FrameLayout android:layout_width="0dp" android:layout_height="64dp" android:layout_weight="1" />
+        <TextView android:layout_width="0dp" android:layout_height="64dp" android:layout_weight="1" android:layout_marginEnd="1dp" android:background="@drawable/widget_course_background" android:backgroundTint="#B4A0DB" android:padding="3dp" android:text="@string/widget_preview_physics" android:textColor="#FFFFFF" android:textSize="11sp" android:textStyle="bold" />
+        <FrameLayout android:layout_width="0dp" android:layout_height="64dp" android:layout_weight="4" />
+    </LinearLayout>
+</LinearLayout>

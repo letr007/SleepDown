@@ -6,14 +6,81 @@
 	objectVersion = 77;
 	objects = {
 
+		F10000000000000000000001 /* TimetableFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001; };
+		F20000000000000000000001 /* TimetableFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iosAppUITests/TimetableFlowTests.swift; sourceTree = SOURCE_ROOT; };
+		F20000000000000000000002 /* iosAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iosAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F30000000000000000000001 /* UI test Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (F10000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
+		F30000000000000000000002 /* UI test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		F50000000000000000000001 /* iosAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F70000000000000000000001;
+			buildPhases = (F30000000000000000000001, F30000000000000000000002, );
+			buildRules = ();
+			dependencies = (A90000000000000000000001, );
+			name = iosAppUITests;
+			productName = iosAppUITests;
+			productReference = F20000000000000000000002;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F70000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (F80000000000000000000001, F80000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		F80000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.iosUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = iosApp; }; name = Debug; };
+		F80000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.iosUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = iosApp; }; name = Release; };
+
 /* Begin PBXBuildFile section */
+		F10000000000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* Assets.xcassets */; };
 		A10000000000000000000001 /* SleepDownIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* SleepDownIOSApp.swift */; };
+		A10000000000000000000002 /* TimetableStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* TimetableStore.swift */; };
+		A10000000000000000000003 /* TimetableViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* TimetableViews.swift */; };
+		A10000000000000000000004 /* DocumentAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* DocumentAdapters.swift */; };
+		A10000000000000000000005 /* ReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* ReminderScheduler.swift */; };
+		A10000000000000000000006 /* TimetableSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* TimetableSupport.swift */; };
+		A10000000000000000000007 /* TimetableStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* TimetableStoreTests.swift */; };
+		B10000000000000000000001 /* WidgetSharedData.swift in iosApp Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* WidgetSharedData.swift */; };
+		B10000000000000000000002 /* WidgetSharedData.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* WidgetSharedData.swift */; };
+		B10000000000000000000003 /* WidgetIntent.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* WidgetIntent.swift */; };
+		B10000000000000000000004 /* Widget.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* Widget.swift */; };
+		B10000000000000000000005 /* SleepDownWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* SleepDownWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10000000000000000000008 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* Localization.swift */; };
+		B10000000000000000000006 /* Localization.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* Localization.swift */; };
+		E10000000000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* Localizable.strings */; };
+		E10000000000000000000002 /* Localizable.strings in Widget Resources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F20000000000000000000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000001 /* SleepDownIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepDownIOSApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000003 /* TimetableStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimetableStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* TimetableViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimetableViews.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* DocumentAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentAdapters.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* ReminderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderScheduler.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* TimetableSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimetableSupport.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* TimetableStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimetableStoreTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* iosAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iosAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000001 /* WidgetSharedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSharedData.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* WidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetIntent.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* Widget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Widget.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* iosApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; };
+		B20000000000000000000005 /* SleepDownWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SleepDownWidgetExtension.entitlements; sourceTree = "<group>"; };
+		B20000000000000000000006 /* SleepDownWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = SleepDownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000007 /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000011 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		E30000000000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		E30000000000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXVariantGroup section */
+		E20000000000000000000001 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				E30000000000000000000001 /* en */,
+				E30000000000000000000002 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A30000000000000000000001 /* Frameworks */ = {
@@ -23,13 +90,50 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A30000000000000000000005 /* iosAppTests Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B30000000000000000000001 /* SleepDownWidgetExtension Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B40000000000000000000001 /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000003 /* Widget.swift */,
+				B20000000000000000000002 /* WidgetIntent.swift */,
+				B20000000000000000000001 /* WidgetSharedData.swift */,
+				B20000000000000000000005 /* SleepDownWidgetExtension.entitlements */,
+				B20000000000000000000007 /* Widget Info.plist */,
+			);
+			path = Widget;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* iosAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000008 /* TimetableStoreTests.swift */,
+			);
+			path = iosAppTests;
+			sourceTree = "<group>";
+		};
 		A40000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* iosApp */,
+				B40000000000000000000001 /* Widget */,
+				A40000000000000000000004 /* iosAppTests */,
+				F20000000000000000000001 /* TimetableFlowTests.swift */,
 				A40000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -38,6 +142,16 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000001 /* SleepDownIOSApp.swift */,
+				F20000000000000000000003 /* Assets.xcassets */,
+				A20000000000000000000010 /* Info.plist */,
+				B20000000000000000000004 /* iosApp.entitlements */,
+				A20000000000000000000003 /* TimetableStore.swift */,
+				A20000000000000000000004 /* TimetableViews.swift */,
+				A20000000000000000000005 /* DocumentAdapters.swift */,
+				A20000000000000000000006 /* ReminderScheduler.swift */,
+				A20000000000000000000007 /* TimetableSupport.swift */,
+				A20000000000000000000011 /* Localization.swift */,
+				E20000000000000000000001 /* Localizable.strings */,
 			);
 			path = iosApp;
 			sourceTree = "<group>";
@@ -46,6 +160,8 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* iosApp.app */,
+				B20000000000000000000006 /* SleepDownWidgetExtension.appex */,
+				F20000000000000000000002 /* iosAppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,6 +169,42 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B50000000000000000000001 /* SleepDownWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B70000000000000000000001 /* Build configuration list for PBXNativeTarget "SleepDownWidgetExtension" */;
+			buildPhases = (
+				C30000000000000000000001 /* Build shared framework */,
+				B30000000000000000000002 /* SleepDownWidgetExtension Sources */,
+				B30000000000000000000001 /* SleepDownWidgetExtension Frameworks */,
+				B30000000000000000000003 /* SleepDownWidgetExtension Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SleepDownWidgetExtension;
+			productName = SleepDownWidgetExtension;
+			productReference = B20000000000000000000006 /* SleepDownWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A50000000000000000000002 /* iosAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000003 /* Build configuration list for PBXNativeTarget "iosAppTests" */;
+			buildPhases = (
+				A30000000000000000000004 /* iosAppTests Sources */,
+				A30000000000000000000005 /* iosAppTests Frameworks */,
+				A30000000000000000000006 /* iosAppTests Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A90000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = iosAppTests;
+			productName = iosAppTests;
+			productReference = A20000000000000000000009 /* iosAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		A50000000000000000000001 /* iosApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A70000000000000000000002 /* Build configuration list for PBXNativeTarget "iosApp" */;
@@ -60,10 +212,12 @@
 				A30000000000000000000002 /* Sources */,
 				A30000000000000000000001 /* Frameworks */,
 				A30000000000000000000003 /* Resources */,
+				B30000000000000000000004 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B90000000000000000000002 /* SleepDownWidgetExtension dependency */,
 			);
 			name = iosApp;
 			productName = iosApp;
@@ -83,6 +237,14 @@
 					A50000000000000000000001 = {
 						CreatedOnToolsVersion = 26.6;
 					};
+					A50000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A50000000000000000000001;
+					};
+					F50000000000000000000001 = {CreatedOnToolsVersion = 26.6; TestTargetID = A50000000000000000000001; };
+					B50000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 				};
 			};
 			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "iosApp" */;
@@ -91,6 +253,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A40000000000000000000001;
@@ -99,61 +262,185 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* iosApp */,
+				A50000000000000000000002 /* iosAppTests */,
+				F50000000000000000000001 /* iosAppUITests */,
+				B50000000000000000000001 /* SleepDownWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A30000000000000000000003 /* Resources */ = {
+		B30000000000000000000003 /* SleepDownWidgetExtension Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000002 /* Localizable.strings in Widget Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A30000000000000000000006 /* iosAppTests Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A30000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E10000000000000000000001 /* Localizable.strings in Resources */,
+				F10000000000000000000002 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		C30000000000000000000001 /* Build shared framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build shared framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nTASKS=\"\"\ncase \"$PLATFORM_NAME\" in\n  iphoneos)\n    TASKS=\":shared:link${CONFIGURATION}FrameworkIosArm64\"\n    ;;\n  iphonesimulator)\n    case \" $ARCHS \" in\n      *\" arm64 \"*) TASKS=\"$TASKS :shared:link${CONFIGURATION}FrameworkIosSimulatorArm64\" ;;\n    esac\n    case \" $ARCHS \" in\n      *\" x86_64 \"*) TASKS=\"$TASKS :shared:link${CONFIGURATION}FrameworkIosX64\" ;;\n    esac\n    ;;\nesac\nif [ -z \"$TASKS\" ]; then\n  echo \"Unsupported Apple platform/architecture: $PLATFORM_NAME $ARCHS\" >&2\n  exit 1\nfi\ncd \"$SRCROOT/..\"\n./gradlew --no-daemon $TASKS\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B30000000000000000000004 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B10000000000000000000005 /* SleepDownWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
+		B30000000000000000000002 /* SleepDownWidgetExtension Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000002 /* WidgetSharedData.swift in Widget Sources */,
+				B10000000000000000000003 /* WidgetIntent.swift in Widget Sources */,
+				B10000000000000000000004 /* Widget.swift in Widget Sources */,
+				B10000000000000000000006 /* Localization.swift in Widget Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A30000000000000000000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000001 /* SleepDownIOSApp.swift in Sources */,
+				A10000000000000000000002 /* TimetableStore.swift in Sources */,
+				A10000000000000000000003 /* TimetableViews.swift in Sources */,
+				A10000000000000000000004 /* DocumentAdapters.swift in Sources */,
+				A10000000000000000000005 /* ReminderScheduler.swift in Sources */,
+				A10000000000000000000006 /* TimetableSupport.swift in Sources */,
+				B10000000000000000000001 /* WidgetSharedData.swift in iosApp Sources */,
+				A10000000000000000000008 /* Localization.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A30000000000000000000004 /* iosAppTests Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000007 /* TimetableStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		A90000000000000000000002 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A60000000000000000000001;
+			proxyType = 1;
+			remoteGlobalIDString = A50000000000000000000001;
+			remoteInfo = iosApp;
+		};
+		B90000000000000000000001 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A60000000000000000000001;
+			proxyType = 1;
+			remoteGlobalIDString = B50000000000000000000001;
+			remoteInfo = SleepDownWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A90000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A50000000000000000000001 /* iosApp */;
+			targetProxy = A90000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		B90000000000000000000002 /* SleepDownWidgetExtension dependency */ = {
+			isa = PBXTargetDependency;
+			target = B50000000000000000000001 /* SleepDownWidgetExtension */;
+			targetProxy = B90000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A80000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				KOTLIN_FRAMEWORK_CONFIGURATION = debug;
+				ENABLE_TESTABILITY = YES;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = SleepDown;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
-				ARCHS = arm64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iosApp/Info.plist;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphonesimulator;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/debugFramework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -167,30 +454,41 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				KOTLIN_FRAMEWORK_CONFIGURATION = release;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = SleepDown;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
-				ARCHS = arm64;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iosApp/Info.plist;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphonesimulator;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/releaseFramework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -214,9 +512,184 @@
 			};
 			name = Release;
 		};
+		A80000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				KOTLIN_FRAMEWORK_CONFIGURATION = debug;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.iosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosApp.app/iosApp";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					shared,
+				);
+			};
+			name = Debug;
+		};
+		A80000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				KOTLIN_FRAMEWORK_CONFIGURATION = release;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.iosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosApp.app/iosApp";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					shared,
+				);
+			};
+			name = Release;
+		};
+		B80000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widget/SleepDownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				KOTLIN_FRAMEWORK_CONFIGURATION = debug;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.ios.WidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					shared,
+				);
+			};
+			name = Debug;
+		};
+		B80000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widget/SleepDownWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				KOTLIN_FRAMEWORK_CONFIGURATION = release;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.letr.sleepdown.ios.WidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosSimulatorArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosX64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/bin/iosArm64/$(KOTLIN_FRAMEWORK_CONFIGURATION)Framework",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					shared,
+				);
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B70000000000000000000001 /* Build configuration list for PBXNativeTarget "SleepDownWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B80000000000000000000001 /* Debug */,
+				B80000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A70000000000000000000001 /* Build configuration list for PBXProject "iosApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -234,6 +707,15 @@
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+		};
+		A70000000000000000000003 /* Build configuration list for PBXNativeTarget "iosAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000005 /* Debug */,
+				A80000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};

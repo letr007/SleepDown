@@ -6,6 +6,9 @@
 # Local machine configuration
 local.properties
 
+# Local release signing key and credentials
+release-signing/
+
 # IDE and OS files
 .idea/
 *.iml
@@ -14,3 +17,20 @@ local.properties
 # Generated Xcode data
 xcuserdata/
 *.xcuserstate
+DerivedData/
+*.xcresult/
+
+# Local verification evidence and agent workflow output
+/artifacts/
+/.pipeline-workspace/
+/.pipeline-last-run-summary.json
+
+# Signing material and local environment overrides
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+.env
+.env.*
+!.env.example

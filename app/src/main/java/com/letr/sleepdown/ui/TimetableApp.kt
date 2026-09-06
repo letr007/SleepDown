@@ -1,5 +1,7 @@
 package com.letr.sleepdown.ui
 
+import android.Manifest
+import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
@@ -7,9 +9,11 @@ import android.content.Intent
 import android.widget.Toast
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -54,8 +58,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.input.pointer.pointerInput
 import com.letr.sleepdown.R
+import androidx.core.os.LocaleListCompat
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
@@ -78,9 +85,11 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
@@ -126,6 +135,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -134,6 +144,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -148,6 +159,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -163,12 +175,18 @@ import com.letr.sleepdown.AppContainer
 import com.letr.sleepdown.data.CourseEntity
 import com.letr.sleepdown.data.CourseItem
 import com.letr.sleepdown.data.CourseTimeEntity
+import com.letr.sleepdown.data.ImportExportAdapter
+import com.letr.sleepdown.data.ImportFormat
+import com.letr.sleepdown.data.ImportOptions
+import com.letr.sleepdown.data.ImportTarget
 import com.letr.sleepdown.data.NodeTimeEntity
 import com.letr.sleepdown.data.TableEntity
 import com.letr.sleepdown.data.TableWithMeta
 import com.letr.sleepdown.data.TimetableRepository
 import com.letr.sleepdown.logic.CourseColors
+import com.letr.sleepdown.domain.ReminderSettings
 import com.letr.sleepdown.logic.Weeks
+import com.letr.sleepdown.reminder.ReminderScheduler
 import com.letr.sleepdown.widget.refreshScheduleWidgets
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -183,29 +201,9 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val WakeUpEditorBackground = Color(0xFFFAF8FF)
-private val WakeUpEditorText = Color(0xFF4A4A4A)
-private val WakeUpEditorHint = Color(0xFFA3A3A3)
-private val WakeUpEditorDivider = Color(0xFFE0DFE8)
-private val WakeUpTeal = Color(0xFF16AEA0)
-private val WakeUpOrange = Color(0xFFFFA622)
-private val WakeUpBlue = Color(0xFF1E88E5)
-private val WakeUpRed = Color(0xFFF63D3E)
-private val WakeUpYellow = Color(0xFFFDD835)
-
 @Composable
 fun TimetableTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = androidx.compose.material3.lightColorScheme(
-            primary = Color(0xFFFF2D55),
-            onPrimary = Color.White,
-            background = Color(0xFFF7F7F7),
-            surface = Color.White,
-            onSurface = Color(0xFF141414),
-            onSurfaceVariant = Color(0xFF626466),
-        ),
-        content = content,
-    )
+    SleepDownAppTheme(content)
 }
 
 private enum class AppScreen {
@@ -217,21 +215,9 @@ private enum class AppScreen {
     COURSE_EDITOR,
     TIME_TABLE,
     IMPORT,
+    REMINDERS,
     WIDGET_HELP,
 }
-
-private data class TimeDraft(
-    val id: Long = 0L,
-    val day: Int = 1,
-    val startNode: Int = 1,
-    val step: Int = 1,
-    val selectedWeeks: Set<Int> = emptySet(),
-    val weekType: Int = CourseTimeEntity.TYPE_ALL,
-    val room: String = "",
-    val ownTime: Boolean = false,
-    val startTime: String = "",
-    val endTime: String = "",
-)
 
 private data class NodeDraft(
     val id: Long,
@@ -263,6 +249,11 @@ private data class TimePickerTarget(
     val isStart: Boolean,
 )
 
+private enum class CourseHoldResult {
+    TAP,
+    MOVED,
+}
+
 private data class ImportNotice(
     val title: String,
     val message: String,
@@ -274,6 +265,7 @@ fun TimetableApp(
     repository: TimetableRepository,
     initialTableId: Long? = null,
     initialImportUri: Uri? = null,
+    onTableRequestConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -287,37 +279,38 @@ fun TimetableApp(
     var editorDay by remember { mutableIntStateOf(1) }
     var editorStartNode by remember { mutableIntStateOf(1) }
     var editorStep by remember { mutableIntStateOf(2) }
-    var selectLatestAfterImport by remember { mutableStateOf(false) }
-    var importTableCountBefore by remember { mutableIntStateOf(-1) }
+    var editorReturnScreen by remember { mutableStateOf(AppScreen.WEEK) }
+    var exportDialog by remember { mutableStateOf(false) }
+    var exportNotice by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val id = repository.ensureDefaultTable()
+        val id = repository.ensureDefaultTable(context.getString(R.string.default_table_name))
         if (currentTableId <= 0L) {
             currentTableId = id
             AppContainer.setCurrentTableId(context, id)
         }
     }
-    LaunchedEffect(initialTableId, tables) {
-        val id = initialTableId
-        if (id != null && tables.any { it.id == id } && currentTableId != id) {
+    fun openRequestedTable() {
+        val id = initialTableId ?: return
+        if (tables.any { it.id == id }) {
             currentTableId = id
             AppContainer.setCurrentTableId(context, id)
+            tableDraft = null
             screen = AppScreen.WEEK
         }
+        onTableRequestConsumed()
     }
-    LaunchedEffect(tables, currentTableId, selectLatestAfterImport) {
-        when {
-            selectLatestAfterImport && tables.size > importTableCountBefore -> {
-                val id = tables.maxByOrNull { it.id }!!.id
-                currentTableId = id
-                AppContainer.setCurrentTableId(context, id)
-                selectLatestAfterImport = false
-            }
-            tables.isNotEmpty() && tables.none { it.id == currentTableId } -> {
-                val id = tables.first().id
-                currentTableId = id
-                AppContainer.setCurrentTableId(context, id)
-            }
+    LaunchedEffect(initialTableId, tables) {
+        if (initialTableId != null && tables.isNotEmpty()) {
+            if (tables.none { it.id == initialTableId }) onTableRequestConsumed()
+            else if (screen != AppScreen.COURSE_EDITOR) openRequestedTable()
+        }
+    }
+    LaunchedEffect(tables, currentTableId) {
+        if (tables.isNotEmpty() && tables.none { it.id == currentTableId }) {
+            val id = tables.first().id
+            currentTableId = id
+            AppContainer.setCurrentTableId(context, id)
         }
     }
 
@@ -326,21 +319,44 @@ fun TimetableApp(
     val tableMeta by remember(repository, tableId) {
         repository.observeTableWithMeta(tableId)
     }.collectAsStateWithLifecycle(initialValue = null)
+    val importExportAdapter = remember(repository, context) { ImportExportAdapter(context, repository) }
+    val jsonExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null && tableId > 0L) {
+            scope.launch {
+                runCatching { importExportAdapter.exportFile(uri, ImportFormat.JSON, tableId) }
+                    .onSuccess { exportNotice = context.getString(R.string.export_json_saved) }
+                    .onFailure { exportNotice = localizedUiError(context, it, R.string.export_failed) }
+            }
+        }
+    }
+    val icsExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/calendar"),
+    ) { uri ->
+        if (uri != null && tableId > 0L) {
+            scope.launch {
+                runCatching { importExportAdapter.exportFile(uri, ImportFormat.ICS, tableId) }
+                    .onSuccess { exportNotice = context.getString(R.string.export_ics_saved) }
+                    .onFailure { exportNotice = localizedUiError(context, it, R.string.export_failed) }
+            }
+        }
+    }
 
     LaunchedEffect(initialImportUri) {
         if (initialImportUri != null) {
             externalImportUri = initialImportUri
-            importTableCountBefore = tables.size
             screen = AppScreen.IMPORT
         }
     }
     LaunchedEffect(tables, tableMeta) {
         if (tables.isNotEmpty() && tableMeta != null) {
             refreshScheduleWidgets(context)
+            ReminderScheduler(context).rebuildCurrentTable()
         }
     }
 
-    BackHandler(enabled = screen != AppScreen.WEEK) {
+    BackHandler(enabled = screen != AppScreen.WEEK && screen != AppScreen.COURSE_EDITOR) {
         screen = when (screen) {
             AppScreen.TABLE_MANAGE -> AppScreen.WEEK
             AppScreen.TABLE_SETTINGS,
@@ -349,6 +365,7 @@ fun TimetableApp(
             AppScreen.COURSE_EDITOR,
             AppScreen.TIME_TABLE,
             AppScreen.IMPORT,
+            AppScreen.REMINDERS,
             AppScreen.WIDGET_HELP -> AppScreen.WEEK
             AppScreen.WEEK -> AppScreen.WEEK
         }
@@ -360,6 +377,7 @@ fun TimetableApp(
     }
 
     fun openAddCourse(day: Int = 1, startNode: Int = 1, step: Int = 2) {
+        editorReturnScreen = screen
         editingCourseId = null
         editorDay = day
         editorStartNode = startNode
@@ -375,7 +393,7 @@ fun TimetableApp(
                 repository.saveNodeTimes(TimetableRepository.defaultNodeTimes(id))
             }
             selectTable(id)
-            showToast(context, "保存成功")
+            showToast(context, context.getString(R.string.save_success))
             screen = AppScreen.WEEK
         }
     }
@@ -385,15 +403,16 @@ fun TimetableApp(
         scope.launch { repository.saveTable(updated) }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF7F7F7)) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (screen) {
             AppScreen.WEEK -> {
                 if (tableMeta == null || table == null) {
                     LoadingView()
                 } else {
                     androidx.compose.runtime.key(tableId) {
-                        ScheduleScreen(
-                            meta = tableMeta!!,
+                        AggregateScheduleScreen(
+                            repository = repository,
+                            table = table,
                             tables = tables,
                             currentTableId = tableId,
                             onSelectTable = ::selectTable,
@@ -403,64 +422,24 @@ fun TimetableApp(
                             onOpenAppearance = { editingTableId = tableId; tableDraft = null; screen = AppScreen.APPEARANCE },
                             onOpenCourseManage = { screen = AppScreen.COURSE_MANAGE },
                             onOpenTimeTable = { screen = AppScreen.TIME_TABLE },
-                            onOpenImport = { importTableCountBefore = tables.size; screen = AppScreen.IMPORT },
+                            onOpenImport = { screen = AppScreen.IMPORT },
                             onOpenWidgetHelp = { screen = AppScreen.WIDGET_HELP },
-                            onShare = {
-                                scope.launch {
-                                    repository.exportBackupResult(tableId).onSuccess { backup ->
-                                        val intent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "application/json"
-                                            putExtra(Intent.EXTRA_TEXT, backup)
-                                        }
-                                        context.startActivity(Intent.createChooser(intent, "分享课表备份"))
-                                    }
-                                    .onFailure { error -> showToast(context, error.message ?: "导出失败") }
-                                }
-                            },
+                            onShare = { exportDialog = true },
+                            courses = tableMeta!!.courses,
                             onEditCourse = { course ->
+                                editorReturnScreen = AppScreen.WEEK
                                 editingCourseId = course.id
                                 editorDay = 1
                                 editorStartNode = 1
                                 editorStep = 1
                                 screen = AppScreen.COURSE_EDITOR
                             },
-                            onDeleteCourse = { course ->
-                                scope.launch {
-                                    repository.deleteCourse(course)
-                                    showToast(context, "删除成功")
-                                }
-                            },
-                            onCopyCourse = { course ->
-                                scope.launch {
-                                    val copy = course.copy(id = 0L, name = "${course.name}（副本）")
-                                    val times = repository.getCourseTimes(course.id).map { it.copy(id = 0L, courseId = 0L) }
-                                    repository.saveCourse(table.id, copy, times)
-                                    showToast(context, "课程已复制")
-                                }
-                            },
-                            onMoveCourse = { item, day, startNode ->
-                                scope.launch {
-                                    val times = repository.getCourseTimes(item.course.id)
-                                    val maxStart = (table.nodeCount - item.time.step + 1).coerceAtLeast(1)
-                                    val updated = times.map { time ->
-                                        if (time.id == item.time.id) {
-                                            time.copy(
-                                                day = day,
-                                                startNode = startNode.coerceIn(1, maxStart),
-                                            )
-                                        } else {
-                                            time
-                                        }
-                                    }
-                                    repository.saveCourse(table.id, item.course, updated)
-                                    showToast(context, "课程已移动")
-                                }
-                            },
                         )
                     }
                 }
             }
-            AppScreen.TABLE_MANAGE -> TableManagementScreen(
+            AppScreen.TABLE_MANAGE -> AggregateTableManagementScreen(
+                repository = repository,
                 tables = tables,
                 currentTableId = tableId,
                 onBack = { tableDraft = null; screen = AppScreen.WEEK },
@@ -470,8 +449,8 @@ fun TimetableApp(
                 onCourses = { tableDraft = null; selectTable(it); screen = AppScreen.COURSE_MANAGE },
                 onCopy = { source ->
                     scope.launch {
-                        selectTable(repository.copyTable(source.id))
-                        showToast(context, "课表已复制")
+                        selectTable(repository.copyTable(source.id, context.getString(R.string.copy_name, source.name)))
+                        showToast(context, context.getString(R.string.table_copied))
                     }
                 },
                 onDelete = { tableToDelete ->
@@ -483,22 +462,24 @@ fun TimetableApp(
                             currentTableId = replacement
                             AppContainer.setCurrentTableId(context, replacement)
                         }
-                        showToast(context, "删除成功")
+                        showToast(context, context.getString(R.string.delete_success))
                     }
                 },
                 onNew = { tableDraft = null; editingTableId = null; screen = AppScreen.TABLE_SETTINGS },
             )
             AppScreen.TABLE_SETTINGS -> {
                 val editingTable = editingTableId?.let { id -> tables.firstOrNull { it.id == id } }
+                val settingsTable = tableDraft ?: editingTable
                 TableSettingsScreen(
-                    table = tableDraft ?: editingTable,
+                    table = settingsTable,
                     onBack = { screen = AppScreen.WEEK },
                     onSave = ::saveTable,
                     onUpdate = updateTable,
-                    currentWeek = (tableDraft ?: table)?.let { currentWeek(it) } ?: 1,
+                    currentWeek = settingsTable?.let { currentWeek(it) } ?: 1,
                     onAppearance = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.APPEARANCE } },
                     onCourses = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.COURSE_MANAGE } },
                     onTimeTable = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.TIME_TABLE } },
+                    onReminders = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.REMINDERS } },
                     onWidgetHelp = { screen = AppScreen.WIDGET_HELP },
                 )
             }
@@ -524,6 +505,7 @@ fun TimetableApp(
                         onBack = { screen = AppScreen.WEEK },
                         onAdd = { openAddCourse() },
                         onEdit = { course ->
+                            editorReturnScreen = AppScreen.COURSE_MANAGE
                             editingCourseId = course.id
                             editorDay = 1
                             editorStartNode = 1
@@ -533,13 +515,13 @@ fun TimetableApp(
                         onDelete = { course ->
                             scope.launch {
                                 repository.deleteCourse(course)
-                                showToast(context, "删除成功")
+                                showToast(context, context.getString(R.string.delete_success))
                             }
                         },
                         onClear = { courses ->
                             scope.launch {
                                 courses.forEach { repository.deleteCourse(it) }
-                                showToast(context, "课程已清空")
+                                showToast(context, context.getString(R.string.courses_cleared))
                             }
                         },
                     )
@@ -555,34 +537,68 @@ fun TimetableApp(
                     initialStep = editorStep,
                     existingCourses = tableMeta?.courses.orEmpty(),
                     nodeTimes = tableMeta?.nodeTimes.orEmpty(),
-                    onBack = { screen = AppScreen.WEEK },
-                    onSaved = { screen = AppScreen.WEEK },
+                    onBack = { screen = editorReturnScreen },
+                    onSaved = {
+                        if (initialTableId != null) openRequestedTable() else screen = editorReturnScreen
+                    },
+                    requestedTableId = initialTableId,
+                    onOpenRequestedTable = ::openRequestedTable,
+                    onCancelTableRequest = onTableRequestConsumed,
                 )
             }
             AppScreen.TIME_TABLE -> {
-                if (table == null) LoadingView() else TimeSettingsScreen(
+                if (table == null) LoadingView() else AggregateTimeSettingsScreen(
                     repository = repository,
                     table = tableDraft ?: table,
-                    onBack = { screen = AppScreen.WEEK },
-                    onCopy = {
-                        scope.launch {
-                            val newId = repository.copyTable(table.id)
-                            selectTable(newId)
-                            screen = AppScreen.WEEK
-                        }
-                    },
+                    onBack = { tableDraft = null; screen = AppScreen.WEEK },
+                    onTableUpdated = { updated -> tableDraft = updated },
                 )
             }
             AppScreen.IMPORT -> ImportScreen(
                 repository = repository,
+                currentTableId = tableId,
                 initialUri = externalImportUri,
                 onInitialUriConsumed = { externalImportUri = null },
                 onBack = { screen = AppScreen.WEEK },
-                onJsonImported = { id -> selectTable(id); screen = AppScreen.WEEK },
-                onCsvImported = { selectLatestAfterImport = true; screen = AppScreen.WEEK },
+                onImported = { id -> selectTable(id); screen = AppScreen.WEEK },
+            )
+            AppScreen.REMINDERS -> ReminderSettingsScreen(
+                repository = repository,
+                tableId = tableId,
+                onBack = { screen = AppScreen.WEEK },
             )
             AppScreen.WIDGET_HELP -> WidgetHelpScreen(onBack = { screen = AppScreen.WEEK })
         }
+    }
+    if (exportDialog) {
+        val baseName = table?.name.orEmpty().ifBlank { context.getString(R.string.default_table_name) }
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        AlertDialog(
+            onDismissRequest = { exportDialog = false },
+            title = { Text(stringResource(R.string.export_timetable_title)) },
+            text = { Text(stringResource(R.string.export_timetable_message)) },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        exportDialog = false
+                        jsonExportLauncher.launch("$baseName.sleepdown.json")
+                    }) { Text(stringResource(R.string.json_backup)) }
+                    TextButton(onClick = {
+                        exportDialog = false
+                        icsExportLauncher.launch("$baseName.ics")
+                    }) { Text(stringResource(R.string.ics_calendar)) }
+                }
+            },
+            dismissButton = { TextButton(onClick = { exportDialog = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    exportNotice?.let { message ->
+        AlertDialog(
+            onDismissRequest = { exportNotice = null },
+            title = { Text(stringResource(R.string.export_result)) },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { exportNotice = null }) { Text(stringResource(R.string.got_it)) } },
+        )
     }
 }
 
@@ -749,10 +765,10 @@ private fun MainToolbar(
     val date = LocalDate.now()
     val dateText = date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(Locale.getDefault()))
     val status = when {
-        week < 1 -> "未开学"
-        week > table.maxWeek -> "学期已结束"
-        week == currentWeek -> "周${weekdayName(LocalDate.now().dayOfWeek.value)}"
-        else -> "非本周"
+        week < 1 -> stringResource(R.string.term_not_started)
+        week > table.maxWeek -> stringResource(R.string.term_ended_status)
+        week == currentWeek -> stringResource(R.string.current_weekday_status, weekdayName(LocalDate.now().dayOfWeek.value))
+        else -> stringResource(R.string.not_current_week)
     }
     val textColor = Color(table.textColor.toInt())
     Row(
@@ -771,36 +787,36 @@ private fun MainToolbar(
         ) {
             Text(dateText, color = textColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("第${week}周", color = textColor.copy(alpha = 0.8f), fontSize = 13.sp)
+                Text(stringResource(R.string.week_number, week), color = textColor.copy(alpha = 0.8f), fontSize = 13.sp)
                 Text(status, color = textColor.copy(alpha = 0.8f), fontSize = 13.sp)
             }
         }
         IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Add, contentDescription = "添加课程", tint = textColor)
+            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_course), tint = textColor)
         }
         IconButton(onClick = onImport, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.FileDownload, contentDescription = "导入课表", tint = textColor)
+            Icon(Icons.Default.FileDownload, contentDescription = stringResource(R.string.import_timetable), tint = textColor)
         }
         Box {
             IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Share, contentDescription = "备份导出", tint = textColor)
+                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.backup_export), tint = textColor)
             }
             DropdownMenu(expanded = shareMenuExpanded, onDismissRequest = onDismissShareMenu) {
-                DropdownMenuItem(text = { Text("导出 JSON 备份") }, onClick = onShareBackup)
+                DropdownMenuItem(text = { Text(stringResource(R.string.export_json_backup)) }, onClick = onShareBackup)
             }
         }
         Box {
             IconButton(onClick = onMore, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.MoreVert, contentDescription = "更多", tint = textColor)
+                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more), tint = textColor)
             }
             DropdownMenu(expanded = moreMenuExpanded, onDismissRequest = onDismissMoreMenu) {
-                DropdownMenuItem(text = { Text("切换课表") }, onClick = onSwitchTable)
-                DropdownMenuItem(text = { Text("课表管理") }, onClick = onManage)
-                DropdownMenuItem(text = { Text("课表设置") }, onClick = onSettings)
-                DropdownMenuItem(text = { Text("课表外观") }, onClick = onAppearance)
-                DropdownMenuItem(text = { Text("课程管理") }, onClick = onCourseManage)
-                DropdownMenuItem(text = { Text("时间表") }, onClick = onTimeTable)
-                DropdownMenuItem(text = { Text("桌面小部件") }, onClick = onWidgetHelp)
+                DropdownMenuItem(text = { Text(stringResource(R.string.switch_table)) }, onClick = onSwitchTable)
+                DropdownMenuItem(text = { Text(stringResource(R.string.table_management)) }, onClick = onManage)
+                DropdownMenuItem(text = { Text(stringResource(R.string.table_settings)) }, onClick = onSettings)
+                DropdownMenuItem(text = { Text(stringResource(R.string.table_appearance)) }, onClick = onAppearance)
+                DropdownMenuItem(text = { Text(stringResource(R.string.course_management)) }, onClick = onCourseManage)
+                DropdownMenuItem(text = { Text(stringResource(R.string.time_table)) }, onClick = onTimeTable)
+                DropdownMenuItem(text = { Text(stringResource(R.string.widgets)) }, onClick = onWidgetHelp)
             }
         }
     }
@@ -825,7 +841,7 @@ private fun SchedulePage(
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(end = if (visibleDays.size == 7) 4.dp else 8.dp)) {
             Box(modifier = Modifier.weight(0.64f).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                Text("$month\n月", color = headerTextColor, fontSize = table.headerTextSize.coerceIn(8, 32).sp, fontWeight = FontWeight.Bold, lineHeight = (table.headerTextSize + 1).sp)
+                Text(stringResource(R.string.month_label, month), color = headerTextColor, fontSize = table.headerTextSize.coerceIn(8, 32).sp, fontWeight = FontWeight.Bold, lineHeight = (table.headerTextSize + 1).sp)
             }
             visibleDays.forEach { day ->
                 val dayDate = dateFor(table, week, day)
@@ -1027,7 +1043,7 @@ private fun ScheduleGrid(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "添加课程", tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_course), tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                     SelectionResizeHandle(
                         modifier = Modifier.offset(x = handleOffsetX, y = handleOffsetY),
@@ -1091,14 +1107,15 @@ private fun ScheduleGrid(
 }
 
 @Composable
-private fun SelectionResizeHandle(
+internal fun SelectionResizeHandle(
     modifier: Modifier,
     rowHeightPx: Float,
     onDragRows: (Int) -> Unit,
 ) {
+    val currentOnDragRows by rememberUpdatedState(onDragRows)
     Image(
         painter = painterResource(R.drawable.sd_add_course_guid_icon),
-        contentDescription = "调整课程节数",
+        contentDescription = stringResource(R.string.adjust_course_length),
         modifier = modifier
             .size(width = 36.dp, height = 72.dp)
             .zIndex(10f)
@@ -1113,7 +1130,7 @@ private fun SelectionResizeHandle(
                         dragPixels += amount.y
                         val delta = (dragPixels / rowHeightPx).roundToInt()
                         if (delta != 0) {
-                            onDragRows(delta)
+                            currentOnDragRows(delta)
                             dragPixels -= delta * rowHeightPx
                         }
                     },
@@ -1147,15 +1164,15 @@ private fun CourseCard(
     val stroke = if (table.strokeColorCompose) blend(Color(table.strokeColor), baseColor) else Color(table.strokeColor)
     val displayAlpha = if (current) 1f else table.otherWeekAlpha.coerceIn(0f, 1f)
     val title = buildString {
-        if (!current) append("[非本周]\n")
+        if (!current) append(stringResource(R.string.non_current_week_marker))
         append(item.course.name)
         if (table.showLocation && time.room.isNotBlank()) {
             append("\n")
             if (table.showRoomPrefix) append("@")
             append(time.room)
         }
-        if (time.weekType == CourseTimeEntity.TYPE_ODD) append("\n单周")
-        if (time.weekType == CourseTimeEntity.TYPE_EVEN) append("\n双周")
+        if (time.weekType == CourseTimeEntity.TYPE_ODD) append(stringResource(R.string.odd_week_marker))
+        if (time.weekType == CourseTimeEntity.TYPE_EVEN) append(stringResource(R.string.even_week_marker))
     }
     val scheduleTime = if (time.ownTime && time.startTime.isNotBlank() && time.endTime.isNotBlank()) {
         "${time.startTime}-${time.endTime}"
@@ -1171,7 +1188,6 @@ private fun CourseCard(
     var dragY by remember(time.id) { mutableFloatStateOf(0f) }
     var dragStartScroll by remember(time.id) { mutableFloatStateOf(0f) }
     var dragChanged by remember(time.id) { mutableStateOf(false) }
-    val dragScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val columnWidthPx = with(density) { columnWidth.toPx() }
     val rowHeightPx = with(density) { rowHeight.toPx() }
@@ -1187,71 +1203,92 @@ private fun CourseCard(
                 translationY = dragY + if (dragging) scrollState.value - dragStartScroll else 0f
             }
             .zIndex(if (dragging) 1f else 0f)
-            .then(if (onMove == null) Modifier else Modifier.pointerInput(time.id, columnWidthPx, rowHeightPx, table.nodeCount, visibleDays.size, viewportHeightPx) {
+            .then(if (onMove == null) Modifier.clickable(onClick = onClick) else Modifier.pointerInput(time.id, columnWidthPx, rowHeightPx, table.nodeCount, visibleDays.size, viewportHeightPx) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val holdResult = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        var totalX = 0f
+                        var totalY = 0f
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id }
-                                ?: return@withTimeoutOrNull false
-                            if (!change.pressed) return@withTimeoutOrNull false
-                            val deltaX = change.position.x - down.position.x
-                            val deltaY = change.position.y - down.position.y
-                            if (abs(deltaX) > viewConfiguration.touchSlop || abs(deltaY) > viewConfiguration.touchSlop) {
-                                return@withTimeoutOrNull false
+                                ?: return@withTimeoutOrNull CourseHoldResult.MOVED
+                            if (!change.pressed) {
+                                return@withTimeoutOrNull if (abs(totalX) <= viewConfiguration.touchSlop && abs(totalY) <= viewConfiguration.touchSlop) {
+                                    CourseHoldResult.TAP
+                                } else {
+                                    CourseHoldResult.MOVED
+                                }
+                            }
+                            totalX += change.position.x - change.previousPosition.x
+                            totalY += change.position.y - change.previousPosition.y
+                            if (abs(totalX) > viewConfiguration.touchSlop || abs(totalY) > viewConfiguration.touchSlop) {
+                                return@withTimeoutOrNull CourseHoldResult.MOVED
                             }
                         }
                     }
-                    if (holdResult != null) return@awaitEachGesture
+                    when (holdResult) {
+                        CourseHoldResult.TAP -> onClick()
+                        CourseHoldResult.MOVED -> Unit
+                        null -> {
+                            down.consume()
+                            dragX = 0f
+                            dragY = 0f
+                            dragStartScroll = scrollState.value.toFloat()
+                            dragChanged = false
+                            dragging = true
+                            var completed = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+                                    if (!change.pressed) {
+                                        completed = true
+                                        break
+                                    }
+                                    change.consume()
+                                    val deltaX = change.position.x - change.previousPosition.x
+                                    val deltaY = change.position.y - change.previousPosition.y
+                                    dragX += deltaX
+                                    dragY += deltaY
+                                    if (deltaX != 0f || deltaY != 0f) dragChanged = true
 
-                    down.consume()
-                    dragX = 0f
-                    dragY = 0f
-                    dragStartScroll = scrollState.value.toFloat()
-                    dragChanged = false
-                    dragging = true
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                            ?: break
-                        if (!change.pressed) break
-                        change.consume()
-                        val delta = change.position - change.previousPosition
-                        dragX += delta.x
-                        dragY += delta.y
-                        if (delta.x != 0f || delta.y != 0f) dragChanged = true
-                        if (viewportHeightPx > 0 && scrollState.maxValue > 0) {
-                            val scrollDelta = scrollState.value - dragStartScroll
-                            val contentTop = rowHeightPx * (time.startNode - 1) + dragY + scrollDelta
-                            val contentBottom = contentTop + cardHeightPx
-                            val edge = with(density) { 48.dp.toPx() }
-                            val viewportTop = scrollState.value.toFloat()
-                            val viewportBottom = viewportTop + viewportHeightPx
-                            val targetScroll = when {
-                                contentTop < viewportTop + edge -> (scrollState.value - 24).coerceAtLeast(0)
-                                contentBottom > viewportBottom - edge -> (scrollState.value + 24).coerceAtMost(scrollState.maxValue)
-                                else -> null
-                            }
-                            if (targetScroll != null && targetScroll != scrollState.value) {
-                                dragScope.launch { scrollState.animateScrollTo(targetScroll) }
+                                    if (viewportHeightPx > 0 && scrollState.maxValue > 0) {
+                                        val scrollDelta = scrollState.value - dragStartScroll
+                                        val contentTop = rowHeightPx * (time.startNode - 1) + dragY + scrollDelta
+                                        val contentBottom = contentTop + cardHeightPx
+                                        val edge = with(density) { 48.dp.toPx() }
+                                        val viewportTop = scrollState.value.toFloat()
+                                        val viewportBottom = viewportTop + viewportHeightPx
+                                        val scrollBy = when {
+                                            contentTop < viewportTop + edge -> -24f
+                                            contentBottom > viewportBottom - edge -> 24f
+                                            else -> 0f
+                                        }
+                                        if (scrollBy != 0f) scrollState.dispatchRawDelta(scrollBy)
+                                    }
+                                }
+
+                                if (completed && dragChanged) {
+                                    val targetColumn = (column + (dragX / columnWidthPx).roundToInt())
+                                        .coerceIn(0, visibleDays.lastIndex)
+                                    val maxStart = (table.nodeCount - step + 1).coerceAtLeast(1)
+                                    val targetNode = (time.startNode + ((dragY + (scrollState.value - dragStartScroll)) / rowHeightPx).roundToInt())
+                                        .coerceIn(1, maxStart)
+                                    if (targetColumn != column || targetNode != time.startNode) {
+                                        onMove(visibleDays[targetColumn], targetNode)
+                                    }
+                                }
+                            } finally {
+                                dragX = 0f
+                                dragY = 0f
+                                dragStartScroll = 0f
+                                dragChanged = false
+                                dragging = false
                             }
                         }
                     }
-
-                    val targetColumn = (column + (dragX / columnWidthPx).roundToInt())
-                        .coerceIn(0, visibleDays.lastIndex)
-                    val maxStart = (table.nodeCount - step + 1).coerceAtLeast(1)
-                    val targetNode = (time.startNode + ((dragY + (scrollState.value - dragStartScroll)) / rowHeightPx).roundToInt())
-                        .coerceIn(1, maxStart)
-                    if (dragChanged && (targetColumn != column || targetNode != time.startNode)) {
-                        onMove(visibleDays[targetColumn], targetNode)
-                    }
-                    dragX = 0f
-                    dragY = 0f
-                    dragStartScroll = 0f
-                    dragChanged = false
-                    dragging = false
                 }
             })
             .width((columnWidth - 2.dp).coerceAtLeast(1.dp))
@@ -1259,7 +1296,6 @@ private fun CourseCard(
             .alpha(displayAlpha)
             .background(baseColor.copy(alpha = table.itemAlpha.coerceIn(0f, 1f)), RoundedCornerShape(table.radius.coerceIn(0, 32).dp))
             .border(2.dp, stroke, RoundedCornerShape(table.radius.coerceIn(0, 32).dp))
-            .clickable(onClick = onClick)
             .padding(4.dp),
     ) {
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = horizontal, verticalArrangement = vertical) {
@@ -1300,18 +1336,18 @@ private fun WeekPickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择周次") },
+        title = { Text(stringResource(R.string.select_week)) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items((1..maxWeek.coerceAtLeast(1)).toList()) { week ->
                     TextButton(onClick = { onSelect(week) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (week == selectedWeek) "✓ 第${week}周" else "第${week}周")
+                        Text(if (week == selectedWeek) stringResource(R.string.selected_week, week) else stringResource(R.string.week_number, week))
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onCurrent) { Text("回到当前周") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = onCurrent) { Text(stringResource(R.string.return_current_week)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -1324,20 +1360,20 @@ private fun TablePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("切换课表") },
+        title = { Text(stringResource(R.string.switch_table)) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                 items(tables, key = { it.id }) { table ->
                     TextButton(onClick = { onSelect(table.id) }, modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(table.name, modifier = Modifier.weight(1f))
-                            if (table.id == selectedId) Icon(Icons.Default.Check, contentDescription = "当前课表")
+                            if (table.id == selectedId) Icon(Icons.Default.Check, contentDescription = stringResource(R.string.current_table))
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -1358,33 +1394,33 @@ private fun CourseActionSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(course.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(table.textColor.toInt()))
-            if (course.teacher.isNotBlank()) Text("授课老师：${course.teacher}")
-            if (course.credit > 0f) Text("学分：${course.credit}")
+            if (course.teacher.isNotBlank()) Text(stringResource(R.string.teacher_value, course.teacher))
+            if (course.credit > 0f) Text(stringResource(R.string.credit_value, course.credit))
             val rooms = items.map { it.time.room }.filter { it.isNotBlank() }.distinct().joinToString("、")
-            if (rooms.isNotBlank()) Text("上课地点：$rooms")
+            if (rooms.isNotBlank()) Text(stringResource(R.string.room_value, rooms))
             items.forEach { item ->
                 val time = item.time
                 val clock = courseTimeLabel(time, nodeTimes)
-                Text("周${weekdayName(time.day)} · $clock · 第${time.startWeek}-${time.endWeek}周${Weeks.weekTypeLabel(time.weekType)}")
+                Text(stringResource(R.string.course_schedule_value, weekdayName(time.day), clock, time.startWeek, time.endWeek, weekTypeLabel(time.weekType)))
             }
-            if (course.note.isNotBlank()) Text("备注：${course.note}")
+            if (course.note.isNotBlank()) Text(stringResource(R.string.note_value, course.note))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onCopy) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text("复制")
+                    Text(stringResource(R.string.copy))
                 }
-                OutlinedButton(onClick = { deleteDialog = true }) { Text("删除") }
+                OutlinedButton(onClick = { deleteDialog = true }) { Text(stringResource(R.string.delete)) }
                 Spacer(Modifier.width(10.dp))
-                Button(onClick = onEdit) { Text("编辑") }
+                Button(onClick = onEdit) { Text(stringResource(R.string.edit)) }
             }
             Spacer(Modifier.height(16.dp))
         }
     }
     if (deleteDialog) {
         ConfirmDialog(
-            title = "提示",
-            text = "确定要删除该课程吗？它的所有时间段都将会被删除。",
+            title = stringResource(R.string.hint),
+            text = stringResource(R.string.delete_course_confirm),
             onConfirm = { deleteDialog = false; onDelete() },
             onDismiss = { deleteDialog = false },
         )
@@ -1397,20 +1433,21 @@ private fun ScreenScaffold(
     title: String,
     onBack: () -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
-    containerColor: Color = Color(0xFFF7F7F7),
+    containerColor: Color? = null,
     titleSize: Int = 20,
     titleWeight: FontWeight = FontWeight.SemiBold,
     titleStartPadding: Dp = 0.dp,
     content: @Composable (PaddingValues) -> Unit,
 ) {
+    val actualContainerColor = containerColor ?: MaterialTheme.colorScheme.background
     Scaffold(
-        containerColor = containerColor,
+        containerColor = actualContainerColor,
         topBar = {
             TopAppBar(
-                title = { Text(title, modifier = Modifier.padding(start = titleStartPadding), color = Color(0xFF141414), fontSize = titleSize.sp, fontWeight = titleWeight) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color(0xFF141414)) } },
+                title = { Text(title, modifier = Modifier.padding(start = titleStartPadding), color = MaterialTheme.colorScheme.onSurface, fontSize = titleSize.sp, fontWeight = titleWeight) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.back), tint = MaterialTheme.colorScheme.onSurface) } },
                 actions = actions,
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = containerColor),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = actualContainerColor),
             )
         },
         content = content,
@@ -1423,12 +1460,12 @@ private fun SettingsGroup(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text(title, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp), color = Color(0xFF626466), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(title, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.White),
+                .background(MaterialTheme.colorScheme.surface),
             content = content,
         )
     }
@@ -1439,7 +1476,7 @@ private fun SettingRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     summary: String = "",
-    tint: Color = Color(0xFF626466),
+    tint: Color? = null,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -1450,11 +1487,11 @@ private fun SettingRow(
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color(0xFF141414), fontSize = 15.sp)
-            if (summary.isNotBlank()) Text(summary, color = Color(0xFF626466), fontSize = 12.sp, lineHeight = 16.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+            if (summary.isNotBlank()) Text(summary, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 16.sp)
         }
         trailing?.invoke()
     }
@@ -1479,22 +1516,22 @@ private fun TableManagementScreen(
     val displayTables = if (sortByName) tables.sortedBy { it.name } else tables
 
     ScreenScaffold(
-        title = "多课表管理",
+        title = stringResource(R.string.multi_table_management),
         onBack = onBack,
         actions = {
             Box {
-                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Sort, contentDescription = "排序") }
+                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort)) }
                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                    DropdownMenuItem(text = { Text("按添加顺序") }, onClick = { sortByName = false; sortMenu = false })
-                    DropdownMenuItem(text = { Text("按名称排序") }, onClick = { sortByName = true; sortMenu = false })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sort_by_add_order)) }, onClick = { sortByName = false; sortMenu = false })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sort_by_name)) }, onClick = { sortByName = true; sortMenu = false })
                 }
             }
-            IconButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "新建课表") }
+            IconButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_table)) }
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (displayTables.isEmpty()) {
-                EmptyState("还没有课表", "创建一张课表开始记录课程", onNew, padding)
+                EmptyState(stringResource(R.string.no_tables), stringResource(R.string.create_table_hint), onNew, padding)
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
@@ -1502,7 +1539,7 @@ private fun TableManagementScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     item {
-                        Text("点击卡片切换当前课表\n长按拖动排序，使用下方按钮管理", modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), color = Color(0xFF626466), fontSize = 12.sp, lineHeight = 18.sp)
+                        Text(stringResource(R.string.table_management_hint), modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
                     }
                     items(displayTables, key = { it.id }) { table ->
                         TableCard(
@@ -1519,7 +1556,7 @@ private fun TableManagementScreen(
                 }
             }
             FloatingActionButton(onClick = onNew, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp), containerColor = Color(0xFFFF2D55), contentColor = Color.White) {
-                Icon(Icons.Default.Add, contentDescription = "新建课表")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_table))
             }
         }
     }
@@ -1527,14 +1564,14 @@ private fun TableManagementScreen(
         if (tables.size <= 1) {
             AlertDialog(
                 onDismissRequest = { deleting = null },
-                title = { Text("无法删除") },
-                text = { Text("至少保留一张课表。请先新建另一张课表，再删除当前课表。") },
-                confirmButton = { TextButton(onClick = { deleting = null }) { Text("知道了") } },
+                title = { Text(stringResource(R.string.cannot_delete)) },
+                text = { Text(stringResource(R.string.keep_one_table)) },
+                confirmButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.got_it)) } },
             )
         } else {
             ConfirmDialog(
-                title = "提示",
-                text = "确定要删除课表「${table.name}」吗？此操作不可撤销。",
+                title = stringResource(R.string.hint),
+                text = stringResource(R.string.delete_table_confirm, table.name),
                 onConfirm = { deleting = null; onDelete(table) },
                 onDismiss = { deleting = null },
             )
@@ -1556,7 +1593,7 @@ private fun TableCard(
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column {
@@ -1564,17 +1601,17 @@ private fun TableCard(
                 TablePreviewBackground(table)
                 Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Bottom) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(table.name.ifBlank { "默认" }, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        if (selected) Icon(Icons.Default.Check, contentDescription = "当前课表", tint = Color.White)
+                        Text(table.name.ifBlank { stringResource(R.string.default_label) }, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        if (selected) Icon(Icons.Default.Check, contentDescription = stringResource(R.string.current_table), tint = Color.White)
                     }
                 }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onCourses) { Icon(Icons.Default.List, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("课程") }
-                TextButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("设置") }
-                TextButton(onClick = onAppearance) { Icon(Icons.Default.Palette, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("外观") }
-                TextButton(onClick = onCopy) { Icon(Icons.Default.ContentCopy, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("复制") }
-                TextButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("删除") }
+                TextButton(onClick = onCourses) { Icon(Icons.Default.List, contentDescription = null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.courses)) }
+                TextButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.settings)) }
+                TextButton(onClick = onAppearance) { Icon(Icons.Default.Palette, contentDescription = null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.appearance)) }
+                TextButton(onClick = onCopy) { Icon(Icons.Default.ContentCopy, contentDescription = null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.copy)) }
+                TextButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.delete)) }
             }
         }
     }
@@ -1602,23 +1639,41 @@ private fun TableSettingsScreen(
     onAppearance: () -> Unit,
     onCourses: () -> Unit,
     onTimeTable: () -> Unit,
+    onReminders: () -> Unit,
     onWidgetHelp: () -> Unit,
 ) {
-    val defaultTable = remember {
-        TableEntity(name = "我的课表", startDate = LocalDate.now().with(java.time.DayOfWeek.MONDAY).toEpochDay())
+    val defaultTableName = stringResource(R.string.default_table_name)
+    val defaultTable = remember(defaultTableName) {
+        TableEntity(name = defaultTableName, startDate = LocalDate.now().with(java.time.DayOfWeek.MONDAY).toEpochDay())
     }
     var working by remember(table) { mutableStateOf(table ?: defaultTable) }
     val context = LocalContext.current
+    val uiSettings by rememberSleepDownUiSettings(context)
+    val emptyImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            SleepDownUiPreferences.setEmptyImageUri(context, uri.toString())
+            SleepDownUiPreferences.setShowEmptyImage(context, true)
+        }
+    }
     var nameDialog by remember { mutableStateOf(false) }
     var numberDialog by remember { mutableStateOf<String?>(null) }
     var dateDialog by remember { mutableStateOf(false) }
+    var currentWeekDateDialog by remember { mutableStateOf(false) }
+    var languageDialog by remember { mutableStateOf(false) }
+    val languageTag = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    val languageSummary = when {
+        languageTag.startsWith("en") -> stringResource(R.string.language_english)
+        languageTag.startsWith("zh") -> stringResource(R.string.language_chinese)
+        else -> stringResource(R.string.language_follow_system)
+    }
 
     fun persistWorking() {
         if (table != null && working.name.isNotBlank()) onUpdate(working)
     }
 
     ScreenScaffold(
-        title = "课表设置",
+        title = stringResource(R.string.table_settings),
         onBack = {
             persistWorking()
             onBack()
@@ -1626,52 +1681,91 @@ private fun TableSettingsScreen(
         actions = {
             IconButton(onClick = {
                 if (working.name.isBlank()) {
-                    Toast.makeText(context, "名称不能为空哦>_<", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.blank_name_error), Toast.LENGTH_SHORT).show()
                 } else {
                     onSave(working)
                 }
-            }) { Icon(Icons.Default.Save, contentDescription = "保存") }
+            }) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save)) }
         },
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
-                SettingsGroup("课表名称") {
-                    SettingRow(Icons.Default.TableView, "课表名称", working.name, tint = Color(0xFF4E7BD9), onClick = { nameDialog = true })
+                SettingsGroup(stringResource(R.string.table_name)) {
+                    SettingRow(Icons.Default.TableView, stringResource(R.string.table_name), working.name, tint = Color(0xFF4E7BD9), onClick = { nameDialog = true })
                 }
             }
             item {
-                SettingsGroup("课表数据") {
-                    SettingRow(Icons.Default.AccessTime, "上课时间", "点击此处更改", tint = Color(0xFF2AA69B), onClick = { persistWorking(); onTimeTable() })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.CalendarMonth, "第一周的第一天", LocalDate.ofEpochDay(working.startDate).toString(), tint = Color(0xFF4E7BD9), onClick = { dateDialog = true })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.CalendarMonth, "当前周", "第${currentWeek.coerceIn(1, working.maxWeek)}周", tint = Color(0xFF4E7BD9))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.List, "一天课程节数", "${working.nodeCount} 节", tint = Color(0xFF4E7BD9), onClick = { numberDialog = "nodeCount" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.CalendarMonth, "学期周数", "${working.maxWeek} 周", tint = Color(0xFF4E7BD9), onClick = { numberDialog = "maxWeek" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.CalendarMonth, "每周从周日开始", trailing = { Switch(checked = working.sundayFirst, onCheckedChange = { working = working.copy(sundayFirst = it) }) }, onClick = { working = working.copy(sundayFirst = !working.sundayFirst) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.List, "管理已添加课程", "集中编辑或清空课程", tint = Color(0xFF4E7BD9), onClick = { persistWorking(); onCourses() })
+                SettingsGroup(stringResource(R.string.table_data)) {
+                    SettingRow(Icons.Default.AccessTime, stringResource(R.string.class_time), stringResource(R.string.tap_to_edit), tint = Color(0xFF2AA69B), onClick = { persistWorking(); onTimeTable() })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.first_day), LocalDate.ofEpochDay(working.startDate).toString(), tint = Color(0xFF4E7BD9), onClick = { dateDialog = true })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(
+                        Icons.Default.CalendarMonth,
+                        stringResource(R.string.current_week),
+                        stringResource(R.string.current_week_summary, currentWeek.coerceIn(1, working.maxWeek), dateFor(working, currentWeek.coerceIn(1, working.maxWeek), if (working.sundayFirst) 7 else 1)),
+                        tint = Color(0xFF4E7BD9),
+                        onClick = { currentWeekDateDialog = true },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.List, stringResource(R.string.nodes_per_day), stringResource(R.string.node_count_summary, working.nodeCount), tint = Color(0xFF4E7BD9), onClick = { numberDialog = "nodeCount" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.term_weeks), stringResource(R.string.term_weeks_summary, working.maxWeek), tint = Color(0xFF4E7BD9), onClick = { numberDialog = "maxWeek" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.sunday_first), trailing = { Switch(checked = working.sundayFirst, onCheckedChange = { working = working.copy(sundayFirst = it) }) }, onClick = { working = working.copy(sundayFirst = !working.sundayFirst) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.List, stringResource(R.string.manage_courses), stringResource(R.string.manage_courses_summary), tint = Color(0xFF4E7BD9), onClick = { persistWorking(); onCourses() })
                 }
             }
             item {
-                SettingsGroup("课表外观") {
-                    SettingRow(Icons.Default.Visibility, "显示周六", trailing = { Switch(checked = working.showSat, onCheckedChange = { working = working.copy(showSat = it, showWeekend = it || working.showSun) }) }, onClick = { working = working.copy(showSat = !working.showSat, showWeekend = !working.showSat || working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Visibility, "显示周日", trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Visibility, "显示非本周课程", trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Tune, "更多外观设置", "课程格子、文字与颜色", tint = Color(0xFF8D62C8), onClick = { persistWorking(); onAppearance() })
+                SettingsGroup(stringResource(R.string.table_appearance)) {
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_saturday), trailing = { Switch(checked = working.showSat, onCheckedChange = { working = working.copy(showSat = it, showWeekend = it || working.showSun) }) }, onClick = { working = working.copy(showSat = !working.showSat, showWeekend = !working.showSat || working.showSun) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_sunday), trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_other_week_courses), trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.more_appearance), stringResource(R.string.appearance_summary), tint = Color(0xFF8D62C8), onClick = { persistWorking(); onAppearance() })
                 }
             }
             item {
-                SettingsGroup("默认配置") {
-                    SettingRow(Icons.Default.Widgets, "桌面小部件", "添加、调整和排查课表小部件", tint = Color(0xFF4E7BD9), onClick = onWidgetHelp)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Refresh, "恢复默认外观", "恢复渐变背景和基础显示设置", tint = Color(0xFFFF8A00), onClick = {
+                SettingsGroup(stringResource(R.string.app_display)) {
+                    Text(stringResource(R.string.theme), modifier = Modifier.padding(start = 16.dp, top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            SleepDownThemeMode.SYSTEM to stringResource(R.string.follow_system),
+                            SleepDownThemeMode.LIGHT to stringResource(R.string.light_theme),
+                            SleepDownThemeMode.DARK to stringResource(R.string.dark_theme),
+                        ).forEach { (mode, label) ->
+                            WeekTypeButton(label, uiSettings.themeMode == mode, {
+                                persistWorking()
+                                SleepDownUiPreferences.setTheme(context, mode)
+                                (context as? Activity)?.recreate()
+                            }, Modifier.weight(1f))
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Language, stringResource(R.string.language), languageSummary, onClick = { languageDialog = true })
+                    SettingRow(Icons.Default.Home, stringResource(R.string.empty_table_image), if (uiSettings.emptyImageUri.isBlank()) stringResource(R.string.default_original_image) else stringResource(R.string.selected_user_image), trailing = { Switch(checked = uiSettings.showEmptyImage, onCheckedChange = { SleepDownUiPreferences.setShowEmptyImage(context, it) }) })
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { emptyImagePicker.launch(arrayOf("image/*")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.choose_image)) }
+                        OutlinedButton(onClick = { SleepDownUiPreferences.setEmptyImageUri(context, "") }, enabled = uiSettings.emptyImageUri.isNotBlank(), modifier = Modifier.weight(1f)) { Text(stringResource(R.string.use_default_image)) }
+                    }
+                    Text(stringResource(R.string.bottom_spacing), modifier = Modifier.padding(start = 16.dp, top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(0 to stringResource(R.string.none), 48 to stringResource(R.string.standard), 96 to stringResource(R.string.roomy)).forEach { (value, label) ->
+                            WeekTypeButton(label, uiSettings.bottomSpacingDp == value, { SleepDownUiPreferences.setBottomSpacing(context, value) }, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.default_config)) {
+                    SettingRow(Icons.Default.Notifications, stringResource(R.string.course_reminders), stringResource(R.string.reminder_summary), tint = Color(0xFF8D62C8), onClick = { persistWorking(); onReminders() })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Widgets, stringResource(R.string.widgets), stringResource(R.string.widget_summary), tint = Color(0xFF4E7BD9), onClick = onWidgetHelp)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Refresh, stringResource(R.string.reset_default_appearance), stringResource(R.string.reset_appearance_summary), tint = Color(0xFFFF8A00), onClick = {
                         working = working.copy(
                             bgImageUri = null,
                             showWeekend = true,
@@ -1708,9 +1802,9 @@ private fun TableSettingsScreen(
 
     if (nameDialog) {
         TextInputDialog(
-            title = "课表名称",
+            title = stringResource(R.string.table_name),
             initial = working.name,
-            validation = { value -> if (value.isBlank()) "名称不能为空哦>_<" else null },
+            validation = { value -> if (value.isBlank()) context.getString(R.string.blank_name_error) else null },
             onConfirm = { value -> working = working.copy(name = value.trim()); nameDialog = false },
             onDismiss = { nameDialog = false },
         )
@@ -1718,10 +1812,10 @@ private fun TableSettingsScreen(
     numberDialog?.let { field ->
         val initial = if (field == "nodeCount") working.nodeCount.toString() else working.maxWeek.toString()
         TextInputDialog(
-            title = if (field == "nodeCount") "一天课程节数" else "学期周数",
+            title = if (field == "nodeCount") stringResource(R.string.nodes_per_day) else stringResource(R.string.term_weeks),
             initial = initial,
             number = true,
-            validation = { value -> if (value.toIntOrNull() == null) "请输入有效数字" else null },
+            validation = { value -> if (value.toIntOrNull() == null) context.getString(R.string.invalid_number) else null },
             onConfirm = { value ->
             val number = value.toIntOrNull()
             if (number != null) {
@@ -1733,8 +1827,73 @@ private fun TableSettingsScreen(
         )
     }
     if (dateDialog) {
-        DatePickerDialogFor(working.startDate, onSelected = { date -> working = working.copy(startDate = date.toEpochDay()); dateDialog = false }, onDismiss = { dateDialog = false })
+        DatePickerDialogFor(
+            working.startDate,
+            onSelected = { date ->
+                working = working.copy(startDate = date.with(java.time.DayOfWeek.MONDAY).toEpochDay())
+                dateDialog = false
+            },
+            onDismiss = { dateDialog = false },
+        )
     }
+    if (currentWeekDateDialog) {
+        val week = currentWeek.coerceIn(1, working.maxWeek)
+        DatePickerDialogFor(
+            value = dateFor(working, week, if (working.sundayFirst) 7 else 1).toEpochDay(),
+            onSelected = { date ->
+                val firstDay = date.minusDays((date.dayOfWeek.value - 1).toLong())
+                working = working.copy(startDate = firstDay.minusWeeks((week - 1).toLong()).toEpochDay())
+                currentWeekDateDialog = false
+            },
+            onDismiss = { currentWeekDateDialog = false },
+        )
+    }
+    if (languageDialog) {
+        LanguagePickerDialog(
+            selectedTag = languageTag,
+            onSelect = { tag ->
+                languageDialog = false
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tag))
+            },
+            onDismiss = { languageDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun LanguagePickerDialog(
+    selectedTag: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = listOf(
+        "" to stringResource(R.string.language_follow_system),
+        "zh-Hans" to stringResource(R.string.language_chinese),
+        "en" to stringResource(R.string.language_english),
+    )
+    val selectedLanguage = selectedTag.substringBefore('-')
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.language_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                options.forEach { (tag, label) ->
+                    val selected = if (tag.isBlank()) {
+                        selectedTag.isBlank()
+                    } else {
+                        selectedLanguage == tag.substringBefore('-')
+                    }
+                    TextButton(onClick = { onSelect(tag) }, modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, modifier = Modifier.weight(1f))
+                            if (selected) Icon(Icons.Default.Check, contentDescription = stringResource(R.string.selected))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable
@@ -1758,17 +1917,17 @@ private fun AppearanceScreen(
     }
 
     ScreenScaffold(
-        title = "课表外观",
+        title = stringResource(R.string.table_appearance),
         onBack = {
             onSave(working)
-            showToast(context, "保存成功")
+            showToast(context, context.getString(R.string.save_success))
             onBack()
         },
         actions = {
             IconButton(onClick = {
                 onSave(working)
-                showToast(context, "保存成功")
-            }) { Icon(Icons.Default.Save, contentDescription = "保存") }
+                showToast(context, context.getString(R.string.save_success))
+            }) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save)) }
         },
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -1776,68 +1935,68 @@ private fun AppearanceScreen(
                 AppearancePreview(table = working, meta = meta)
             }
             item {
-                SettingsGroup("整体") {
+                SettingsGroup(stringResource(R.string.overall)) {
                     SettingRow(
                         Icons.Default.Palette,
-                        "课程表背景",
-                        if (working.bgImageUri.isNullOrBlank()) "默认渐变背景" else "已设置图片背景",
+                        stringResource(R.string.timetable_background),
+                        if (working.bgImageUri.isNullOrBlank()) stringResource(R.string.default_gradient_background) else stringResource(R.string.image_background_set),
                         tint = Color(0xFF4E7BD9),
                         onClick = { imagePicker.launch(arrayOf("image/*")) },
                         trailing = {
                             if (!working.bgImageUri.isNullOrBlank()) {
-                                TextButton(onClick = { working = working.copy(bgImageUri = null) }) { Text("清除") }
+                                TextButton(onClick = { working = working.copy(bgImageUri = null) }) { Text(stringResource(R.string.clear)) }
                             }
                         },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.GridOn, "显示网格辅助线", trailing = { Switch(checked = working.showGrid, onCheckedChange = { working = working.copy(showGrid = it) }) }, onClick = { working = working.copy(showGrid = !working.showGrid) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.TextFields, "界面文字颜色", colorName(working.textColor.toInt()), tint = Color(0xFF2AA69B), onClick = { colorTarget = "text" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.TextFields, "表头文字大小", "${working.headerTextSize} sp", tint = Color(0xFF2AA69B), onClick = { inputTarget = "headerTextSize" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.AccessTime, "节数栏显示时间", trailing = { Switch(checked = working.showTimeBar, onCheckedChange = { working = working.copy(showTimeBar = it) }) }, onClick = { working = working.copy(showTimeBar = !working.showTimeBar) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Visibility, "显示周六", trailing = { Switch(checked = working.showSat, onCheckedChange = { working = working.copy(showSat = it, showWeekend = it || working.showSun) }) }, onClick = { working = working.copy(showSat = !working.showSat, showWeekend = !working.showSat || working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Visibility, "显示周日", trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Visibility, "显示非本周课程", trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.GridOn, stringResource(R.string.show_grid_guides), trailing = { Switch(checked = working.showGrid, onCheckedChange = { working = working.copy(showGrid = it) }) }, onClick = { working = working.copy(showGrid = !working.showGrid) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.interface_text_color), colorName(working.textColor.toInt()), tint = Color(0xFF2AA69B), onClick = { colorTarget = "text" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.header_text_size), stringResource(R.string.size_sp, working.headerTextSize), tint = Color(0xFF2AA69B), onClick = { inputTarget = "headerTextSize" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.AccessTime, stringResource(R.string.show_time_bar), trailing = { Switch(checked = working.showTimeBar, onCheckedChange = { working = working.copy(showTimeBar = it) }) }, onClick = { working = working.copy(showTimeBar = !working.showTimeBar) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_saturday), trailing = { Switch(checked = working.showSat, onCheckedChange = { working = working.copy(showSat = it, showWeekend = it || working.showSun) }) }, onClick = { working = working.copy(showSat = !working.showSat, showWeekend = !working.showSat || working.showSun) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_sunday), trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_other_week_courses), trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
                 }
             }
             item {
-                SettingsGroup("课程格子") {
-                    SettingRow(Icons.Default.TextFields, "课程文字颜色", colorName(working.courseTextColor), tint = Color(0xFF4E7BD9), onClick = { colorTarget = "course" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "课程文字颜色叠加格子颜色", trailing = { Switch(checked = working.textColorCompose, onCheckedChange = { working = working.copy(textColorCompose = it) }) }, onClick = { working = working.copy(textColorCompose = !working.textColorCompose) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "格子边框颜色", colorName(working.strokeColor), tint = Color(0xFFFF8A00), onClick = { colorTarget = "stroke" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "边框使用格子颜色", trailing = { Switch(checked = working.strokeColorCompose, onCheckedChange = { working = working.copy(strokeColorCompose = it) }) }, onClick = { working = working.copy(strokeColorCompose = !working.strokeColorCompose) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.GridOn, "课表格子使用虚线边框", trailing = { Switch(checked = working.useDottedLine, onCheckedChange = { working = working.copy(useDottedLine = it) }) }, onClick = { working = working.copy(useDottedLine = !working.useDottedLine) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Tune, "课程格子高度", "${working.itemHeightDp} dp", tint = Color(0xFF8D62C8), onClick = { inputTarget = "height" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Tune, "格子圆角半径", "${working.radius} dp", tint = Color(0xFF8D62C8), onClick = { inputTarget = "radius" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "课程格子不透明度", "${(working.itemAlpha * 100).toInt()}%", tint = Color(0xFF8D62C8), onClick = { inputTarget = "alpha" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "非本周课程不透明比", "${(working.otherWeekAlpha * 100).toInt()}%", tint = Color(0xFF8D62C8), onClick = { inputTarget = "otherAlpha" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.TextFields, "课程显示文字大小", "${working.itemTextSize} sp", tint = Color(0xFF4E7BD9), onClick = { inputTarget = "itemTextSize" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.TextFields, "格子文字水平居中", trailing = { Switch(checked = working.itemCenterHorizontal, onCheckedChange = { working = working.copy(itemCenterHorizontal = it) }) }, onClick = { working = working.copy(itemCenterHorizontal = !working.itemCenterHorizontal) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.TextFields, "格子文字竖直居中", trailing = { Switch(checked = working.itemCenterVertical, onCheckedChange = { working = working.copy(itemCenterVertical = it) }) }, onClick = { working = working.copy(itemCenterVertical = !working.itemCenterVertical) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.AccessTime, "在格子内显示上课时间", trailing = { Switch(checked = working.showTime, onCheckedChange = { working = working.copy(showTime = it) }) }, onClick = { working = working.copy(showTime = !working.showTime) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Place, "在格子内显示上课地点", trailing = { Switch(checked = working.showLocation, onCheckedChange = { working = working.copy(showLocation = it) }) }, onClick = { working = working.copy(showLocation = !working.showLocation) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Place, "上课地点前显示@", trailing = { Switch(checked = working.showRoomPrefix, onCheckedChange = { working = working.copy(showRoomPrefix = it) }) }, onClick = { working = working.copy(showRoomPrefix = !working.showRoomPrefix) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Person, "在格子内显示授课老师", trailing = { Switch(checked = working.showTeacher, onCheckedChange = { working = working.copy(showTeacher = it) }) }, onClick = { working = working.copy(showTeacher = !working.showTeacher) })
+                SettingsGroup(stringResource(R.string.course_cells)) {
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.course_text_color), colorName(working.courseTextColor), tint = Color(0xFF4E7BD9), onClick = { colorTarget = "course" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.course_text_overlay), trailing = { Switch(checked = working.textColorCompose, onCheckedChange = { working = working.copy(textColorCompose = it) }) }, onClick = { working = working.copy(textColorCompose = !working.textColorCompose) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.cell_border_color), colorName(working.strokeColor), tint = Color(0xFFFF8A00), onClick = { colorTarget = "stroke" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.border_uses_cell_color), trailing = { Switch(checked = working.strokeColorCompose, onCheckedChange = { working = working.copy(strokeColorCompose = it) }) }, onClick = { working = working.copy(strokeColorCompose = !working.strokeColorCompose) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.GridOn, stringResource(R.string.dotted_border), trailing = { Switch(checked = working.useDottedLine, onCheckedChange = { working = working.copy(useDottedLine = it) }) }, onClick = { working = working.copy(useDottedLine = !working.useDottedLine) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.cell_height), stringResource(R.string.size_dp, working.itemHeightDp), tint = Color(0xFF8D62C8), onClick = { inputTarget = "height" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.corner_radius), stringResource(R.string.size_dp, working.radius), tint = Color(0xFF8D62C8), onClick = { inputTarget = "radius" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.course_opacity), stringResource(R.string.percentage, (working.itemAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { inputTarget = "alpha" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.other_week_opacity), stringResource(R.string.percentage, (working.otherWeekAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { inputTarget = "otherAlpha" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.course_text_size), stringResource(R.string.size_sp_float, working.itemTextSize), tint = Color(0xFF4E7BD9), onClick = { inputTarget = "itemTextSize" })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.horizontal_center), trailing = { Switch(checked = working.itemCenterHorizontal, onCheckedChange = { working = working.copy(itemCenterHorizontal = it) }) }, onClick = { working = working.copy(itemCenterHorizontal = !working.itemCenterHorizontal) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.vertical_center), trailing = { Switch(checked = working.itemCenterVertical, onCheckedChange = { working = working.copy(itemCenterVertical = it) }) }, onClick = { working = working.copy(itemCenterVertical = !working.itemCenterVertical) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.AccessTime, stringResource(R.string.show_course_time), trailing = { Switch(checked = working.showTime, onCheckedChange = { working = working.copy(showTime = it) }) }, onClick = { working = working.copy(showTime = !working.showTime) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Place, stringResource(R.string.show_course_room), trailing = { Switch(checked = working.showLocation, onCheckedChange = { working = working.copy(showLocation = it) }) }, onClick = { working = working.copy(showLocation = !working.showLocation) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Place, stringResource(R.string.room_prefix_at), trailing = { Switch(checked = working.showRoomPrefix, onCheckedChange = { working = working.copy(showRoomPrefix = it) }) }, onClick = { working = working.copy(showRoomPrefix = !working.showRoomPrefix) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Person, stringResource(R.string.show_teacher), trailing = { Switch(checked = working.showTeacher, onCheckedChange = { working = working.copy(showTeacher = it) }) }, onClick = { working = working.copy(showTeacher = !working.showTeacher) })
                 }
             }
         }
@@ -1845,7 +2004,11 @@ private fun AppearanceScreen(
 
     colorTarget?.let { target ->
         ColorChoiceDialog(
-            title = when (target) { "text" -> "界面文字颜色"; "course" -> "课程文字颜色"; else -> "格子边框颜色" },
+            title = when (target) {
+                "text" -> stringResource(R.string.interface_text_color)
+                "course" -> stringResource(R.string.course_text_color)
+                else -> stringResource(R.string.cell_border_color)
+            },
             initial = when (target) { "text" -> working.textColor.toInt(); "course" -> working.courseTextColor; else -> working.strokeColor },
             onSelect = { color ->
                 working = when (target) {
@@ -1869,12 +2032,12 @@ private fun AppearanceScreen(
         }
         TextInputDialog(
             title = when (target) {
-                "headerTextSize" -> "表头文字大小"
-                "height" -> "课程格子高度"
-                "radius" -> "格子圆角半径"
-                "alpha" -> "课程格子不透明度（0-100）"
-                "otherAlpha" -> "非本周课程不透明比（0-100）"
-                else -> "课程显示文字大小"
+                "headerTextSize" -> stringResource(R.string.header_text_size)
+                "height" -> stringResource(R.string.cell_height)
+                "radius" -> stringResource(R.string.corner_radius)
+                "alpha" -> stringResource(R.string.opacity_range, stringResource(R.string.course_opacity))
+                "otherAlpha" -> stringResource(R.string.opacity_range, stringResource(R.string.other_week_opacity))
+                else -> stringResource(R.string.course_text_size)
             },
             initial = initial,
             number = true,
@@ -1902,7 +2065,7 @@ private fun AppearancePreview(table: TableEntity, meta: TableWithMeta) {
         Box(modifier = Modifier.fillMaxWidth().height(230.dp)) {
             ScheduleBackground(table)
             Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                Text("预览", color = Color(table.textColor.toInt()), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.preview), color = Color(table.textColor.toInt()), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     (1..5).forEach { day ->
                         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) { Text("${weekdayName(day)}\n${day + 1}", color = Color(table.textColor.toInt()).copy(alpha = 0.7f), fontSize = 10.sp) }
@@ -1912,7 +2075,7 @@ private fun AppearancePreview(table: TableEntity, meta: TableWithMeta) {
                     repeat(5) { index ->
                         val color = CourseColors.asColor(CourseColors.all()[index % CourseColors.all().size])
                         Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = (index * 8).dp).background(color.copy(alpha = table.itemAlpha), RoundedCornerShape(table.radius.dp)).border(1.dp, Color(table.strokeColor), RoundedCornerShape(table.radius.dp)), contentAlignment = Alignment.Center) {
-                            Text(meta.courses.getOrNull(index)?.name ?: "课程", color = Color(table.courseTextColor), fontSize = table.itemTextSize.coerceIn(8f, 20f).sp, fontWeight = FontWeight.Bold)
+                            Text(meta.courses.getOrNull(index)?.name ?: stringResource(R.string.course_name), color = Color(table.courseTextColor), fontSize = table.itemTextSize.coerceIn(8f, 20f).sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1939,26 +2102,26 @@ private fun CourseManagementScreen(
     val displayCourses = if (sortByName) courses.sortedBy { it.name } else courses
 
     ScreenScaffold(
-        title = "课程管理",
+        title = stringResource(R.string.course_management),
         onBack = onBack,
         actions = {
             Box {
-                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Sort, contentDescription = "排序") }
+                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort)) }
                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                    DropdownMenuItem(text = { Text("按添加顺序") }, onClick = { sortByName = false; sortMenu = false })
-                    DropdownMenuItem(text = { Text("按课程名称") }, onClick = { sortByName = true; sortMenu = false })
-                    DropdownMenuItem(text = { Text("清空") }, onClick = { sortMenu = false; clearDialog = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sort_by_add_order)) }, onClick = { sortByName = false; sortMenu = false })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sort_by_course_name)) }, onClick = { sortByName = true; sortMenu = false })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.clear_courses)) }, onClick = { sortMenu = false; clearDialog = true })
                 }
             }
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "添加课程") }
+            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_course)) }
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (displayCourses.isEmpty()) {
-                EmptyState("还没有添加任何课程哦", "轻触右上角加号开始添加", onAdd, padding)
+                EmptyState(stringResource(R.string.no_courses), stringResource(R.string.add_course_hint), onAdd, padding)
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 8.dp, bottom = 84.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { Text("轻触编辑，长按删除", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), color = Color(0xFF626466), fontSize = 12.sp) }
+                    item { Text(stringResource(R.string.course_list_hint), modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp) }
                     items(displayCourses, key = { it.id }) { course ->
                         val color = CourseColors.asColor(courseColor(course))
                         Card(
@@ -1971,22 +2134,22 @@ private fun CourseManagementScreen(
                             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         ) {
                             Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                                Text(course.name, color = Color(0xFF141414), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                                Text(course.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                 }
             }
             FloatingActionButton(onClick = onAdd, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp), containerColor = Color(0xFFFF2D55), contentColor = Color.White) {
-                Icon(Icons.Default.Add, contentDescription = "添加课程")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_course))
             }
         }
     }
     if (clearDialog) {
-        ConfirmDialog(title = "提示", text = "真的要清空课表吗？这将无法恢复。", onConfirm = { clearDialog = false; onClear(courses) }, onDismiss = { clearDialog = false })
+        ConfirmDialog(title = stringResource(R.string.hint), text = stringResource(R.string.clear_courses_confirm), onConfirm = { clearDialog = false; onClear(courses) }, onDismiss = { clearDialog = false })
     }
     deleteCourse?.let { course ->
-        ConfirmDialog(title = "提示", text = "确定要删除该课程吗？它的所有时间段都将会被删除。", onConfirm = { deleteCourse = null; onDelete(course) }, onDismiss = { deleteCourse = null })
+        ConfirmDialog(title = stringResource(R.string.hint), text = stringResource(R.string.delete_course_confirm), onConfirm = { deleteCourse = null; onDelete(course) }, onDismiss = { deleteCourse = null })
     }
 }
 
@@ -2003,11 +2166,13 @@ private fun CourseEditorScreen(
     nodeTimes: List<NodeTimeEntity>,
     onBack: () -> Unit,
     onSaved: () -> Unit,
+    requestedTableId: Long?,
+    onOpenRequestedTable: () -> Unit,
+    onCancelTableRequest: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var name by remember(courseId, table.id) { mutableStateOf("") }
-    var teacher by remember(courseId, table.id) { mutableStateOf("") }
     var note by remember(courseId, table.id) { mutableStateOf("") }
     var credit by remember(courseId, table.id) { mutableStateOf("") }
     var color by remember(courseId, table.id) { mutableIntStateOf(0) }
@@ -2016,88 +2181,120 @@ private fun CourseEditorScreen(
     var error by remember(courseId, table.id, initialDay, initialStartNode, initialStep) { mutableStateOf<String?>(null) }
     var inputTarget by remember { mutableStateOf<String?>(null) }
     var colorDialog by remember { mutableStateOf(false) }
-    var customTimeInfo by remember { mutableStateOf(false) }
     var roomEditorIndex by remember { mutableStateOf<Int?>(null) }
+    var teacherEditorIndex by remember { mutableStateOf<Int?>(null) }
+    var openTimeDialogs by remember { mutableIntStateOf(0) }
+    val hasEditorDialog = inputTarget != null || colorDialog || roomEditorIndex != null ||
+        teacherEditorIndex != null || openTimeDialogs > 0
     val availableNodeTimes = nodeTimesFor(table, nodeTimes)
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var initialSnapshot by remember(courseId, table.id) { mutableStateOf<CourseEditorSnapshot?>(null) }
+    var discardDialog by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val title = if (courseId == null) stringResource(R.string.add_course) else stringResource(R.string.edit_course_title)
+    fun leaveEditor() {
+        if (requestedTableId != null) onOpenRequestedTable() else onBack()
+    }
+    fun requestBack() {
+        if (saving) return
+        val current = CourseEditorSnapshot(name, color, credit, note, drafts.toList())
+        if (initialSnapshot != null && current != initialSnapshot) discardDialog = true else leaveEditor()
+    }
+    fun keepEditing() {
+        discardDialog = false
+        if (requestedTableId != null) onCancelTableRequest()
+    }
+    BackHandler(onBack = ::requestBack)
+    LaunchedEffect(requestedTableId, loaded, saving, hasEditorDialog) {
+        if (requestedTableId != null && loaded && !saving && !hasEditorDialog) requestBack()
+    }
 
     LaunchedEffect(courseId, table.id, initialDay, initialStartNode, initialStep) {
-        drafts.clear()
-        if (courseId == null) {
-            drafts.add(defaultTimeDraft(table.maxWeek, initialDay, initialStartNode, initialStep))
-        } else {
-            val course = repository.getCourse(courseId)
-            if (course != null) {
+        try {
+            drafts.clear()
+            if (courseId == null) {
+                drafts += defaultTimeDraft(table.maxWeek, initialDay, initialStartNode, initialStep, table.nodeCount)
+            } else {
+                val course = repository.getCourse(courseId)
+                    ?: error(context.getString(R.string.course_load_failed))
                 name = course.name
-                teacher = course.teacher
                 note = course.note
                 credit = if (course.credit == 0f) "" else course.credit.toString()
                 color = course.color
-                repository.getCourseTimes(courseId).forEach { time ->
-                    drafts += TimeDraft(
-                        id = time.id,
-                        day = time.day,
-                        startNode = time.startNode,
-                        step = time.step,
-                        selectedWeeks = selectedWeeks(time, table.maxWeek),
-                        weekType = time.weekType,
-                        room = time.room,
-                        ownTime = time.ownTime,
-                        startTime = time.startTime,
-                        endTime = time.endTime,
-                    )
-                }
-                if (drafts.isEmpty()) drafts.add(defaultTimeDraft(table.maxWeek, initialDay, initialStartNode, initialStep))
+                drafts += courseTimeDrafts(course, repository.getCourseTimes(courseId))
             }
+            initialSnapshot = CourseEditorSnapshot(name, color, credit, note, drafts.toList())
+            loaded = true
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = context.getString(R.string.course_load_failed)
+            android.util.Log.e("CourseEditor", "Failed to load course", failure)
         }
-        loaded = true
     }
 
     if (!loaded) {
-        LoadingView()
+        ScreenScaffold(title = title, onBack = onBack) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text(error ?: stringResource(R.string.loading), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         return
     }
 
     fun save() {
-        when {
-            name.isBlank() -> {
-                error = "请填写课程名称"
-                showToast(context, "请填写课程名称")
-            }
-            drafts.isEmpty() -> {
-                error = "请至少添加一个时间段"
-                showToast(context, "请至少添加一个时间段")
-            }
-            drafts.any { it.selectedWeeks.isEmpty() } -> {
-                error = "请至少选择一周"
-                showToast(context, "请至少选择一周")
-            }
-            else -> scope.launch {
-                val entity = CourseEntity(
-                    id = courseId ?: 0L,
-                    tableId = table.id,
-                    name = name.trim(),
-                    color = if (color == 0) CourseColors.colorFor(name) else color,
-                    teacher = teacher.trim(),
-                    note = note.trim(),
-                    credit = credit.toFloatOrNull() ?: 0f,
-                )
-                repository.saveCourse(table.id, entity, drafts.flatMap { it.toEntities(entity.id) })
-                showToast(context, "保存成功")
+        if (saving) return
+        val validationError = when {
+            name.isBlank() -> R.string.course_name_required
+            drafts.isEmpty() -> R.string.time_slot_required
+            drafts.any { it.selectedWeeks.isEmpty() } -> R.string.week_required
+            drafts.any { it.selectedWeeks.any { week -> week !in 1..table.maxWeek } } -> R.string.valid_week_range
+            drafts.any { it.day !in 1..7 || it.startNode < 1 || it.step < 1 || it.startNode + it.step - 1 > table.nodeCount } -> R.string.day_period_required_aggregate
+            !validCourseCredit(credit) -> R.string.course_credit_invalid
+            drafts.any { it.ownTime && !customTimeRangeValid(it.startTime, it.endTime) } -> R.string.custom_time_invalid
+            else -> null
+        }
+        if (validationError != null) {
+            error = context.getString(validationError)
+            showToast(context, context.getString(validationError))
+            return
+        }
+        val entity = CourseEntity(
+            id = courseId ?: 0L,
+            tableId = table.id,
+            name = name.trim(),
+            color = if (color == 0) CourseColors.colorFor(name) else color,
+            teacher = drafts.firstOrNull()?.teacher?.trim().orEmpty(),
+            note = note.trim(),
+            credit = credit.toFloatOrNull() ?: 0f,
+        )
+        val times = drafts.flatMap { it.toEntities(entity.id) }
+        focusManager.clearFocus()
+        saving = true
+        error = null
+        scope.launch {
+            try {
+                repository.saveCourse(table.id, entity, times)
+                showToast(context, context.getString(R.string.save_success))
                 onSaved()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = context.getString(R.string.aggregate_save_failed)
+                showToast(context, context.getString(R.string.aggregate_save_failed))
+                android.util.Log.e("CourseEditor", "Failed to save course", failure)
+            } finally {
+                saving = false
             }
         }
     }
 
     ScreenScaffold(
-        title = if (courseId == null) "添加课程" else "编辑课程",
-        onBack = onBack,
-        containerColor = WakeUpEditorBackground,
-        titleSize = 22,
-        titleWeight = FontWeight.Normal,
-        titleStartPadding = 3.dp,
+        title = title,
+        onBack = ::requestBack,
         actions = {
-            TextButton(onClick = ::save, modifier = Modifier.offset(x = 7.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
-                Text("保存", color = WakeUpEditorText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            TextButton(onClick = ::save, enabled = !saving) {
+                Text(stringResource(if (saving) R.string.course_saving else R.string.save))
             }
         },
     ) { padding ->
@@ -2127,48 +2324,86 @@ private fun CourseEditorScreen(
                         table = table,
                         nodeTimes = availableNodeTimes,
                         onChange = { drafts[index] = it },
-                        onRemove = { if (drafts.size > 1) drafts.removeAt(index) },
-                        onTeacher = { inputTarget = "teacher" },
+                        onRemove = { drafts.removeAt(index) },
+                        onTeacher = { teacherEditorIndex = index },
                         onRoom = { roomEditorIndex = index },
-                        teacher = teacher,
-                        onCustomTimeInfo = { customTimeInfo = true },
+                        teacher = drafts[index].teacher,
+                        onDialogVisibilityChanged = { visible -> openTimeDialogs += if (visible) 1 else -1 },
                     )
                 }
                 item { error?.let { Text(it, modifier = Modifier.padding(horizontal = 40.dp, vertical = 4.dp), color = Color(0xFFD32F2F), fontSize = 13.sp) } }
             }
             FloatingActionButton(
-                onClick = { drafts += defaultTimeDraft(table.maxWeek, 1, 1) },
+                onClick = { if (!saving) drafts += defaultTimeDraft(table.maxWeek, 1, 1, maxNode = table.nodeCount) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 40.dp),
-                containerColor = Color(0xFFDCE1FF),
-                contentColor = Color(0xFF03174B),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
-                Icon(Icons.Default.Add, contentDescription = "添加时间段")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_time_slot))
+            }
+            if (saving) {
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
+                        .clickable { },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(R.string.course_saving), color = MaterialTheme.colorScheme.onSurface)
+                }
             }
         }
     }
 
+    if (discardDialog) {
+        AlertDialog(
+            onDismissRequest = ::keepEditing,
+            title = { Text(stringResource(R.string.discard_course_title)) },
+            text = { Text(stringResource(R.string.discard_course_message)) },
+            confirmButton = { TextButton(onClick = { discardDialog = false; leaveEditor() }) { Text(stringResource(R.string.discard_changes)) } },
+            dismissButton = { TextButton(onClick = ::keepEditing) { Text(stringResource(R.string.keep_editing)) } },
+        )
+    }
     inputTarget?.let { target ->
-        val initial = when (target) { "credit" -> credit; "note" -> note; else -> teacher }
+        val initial = when (target) { "credit" -> credit; else -> note }
         TextInputDialog(
-            title = when (target) { "credit" -> "学分"; "note" -> "备注"; else -> "授课老师" },
+            title = if (target == "credit") stringResource(R.string.credits) else stringResource(R.string.notes),
             initial = initial,
             number = target == "credit",
+            validation = { value ->
+                if (target == "credit" && !validCourseCredit(value)) context.getString(R.string.course_credit_invalid) else null
+            },
             multiline = target == "note",
             clearable = true,
             onConfirm = { value ->
-                when (target) { "credit" -> credit = value; "note" -> note = value; else -> teacher = value }
+                if (target == "credit") credit = value else note = value
                 inputTarget = null
             },
             onClear = {
-                when (target) { "credit" -> credit = ""; "note" -> note = ""; else -> teacher = "" }
+                if (target == "credit") credit = "" else note = ""
                 inputTarget = null
             },
             onDismiss = { inputTarget = null },
         )
     }
+    teacherEditorIndex?.let { index ->
+        TextInputDialog(
+            title = stringResource(R.string.teacher),
+            initial = drafts.getOrNull(index)?.teacher.orEmpty(),
+            clearable = true,
+            onConfirm = { value ->
+                drafts.getOrNull(index)?.let { drafts[index] = it.copy(teacher = value) }
+                teacherEditorIndex = null
+            },
+            onClear = {
+                drafts.getOrNull(index)?.let { drafts[index] = it.copy(teacher = "") }
+                teacherEditorIndex = null
+            },
+            onDismiss = { teacherEditorIndex = null },
+        )
+    }
     roomEditorIndex?.let { index ->
         TextInputDialog(
-            title = "上课地点",
+            title = stringResource(R.string.room),
             initial = drafts.getOrNull(index)?.room.orEmpty(),
             clearable = true,
             onConfirm = { value -> drafts[index] = drafts[index].copy(room = value); roomEditorIndex = null },
@@ -2177,15 +2412,7 @@ private fun CourseEditorScreen(
         )
     }
     if (colorDialog) {
-        ColorChoiceDialog(title = "课程颜色", initial = color, includeAuto = true, onSelect = { color = it; colorDialog = false }, onDismiss = { colorDialog = false })
-    }
-    if (customTimeInfo) {
-        AlertDialog(
-            onDismissRequest = { customTimeInfo = false },
-            title = { Text("自定义时间") },
-            text = { Text("自定义时间会按照具体时间决定显示位置。") },
-            confirmButton = { TextButton(onClick = { customTimeInfo = false }) { Text("知道了") } },
-        )
+        ColorChoiceDialog(title = stringResource(R.string.course_color), initial = color, includeAuto = true, onSelect = { color = it; colorDialog = false }, onDismiss = { colorDialog = false })
     }
 }
 
@@ -2202,16 +2429,16 @@ private fun CourseBaseEditorSection(
     onNoteClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_class_24, WakeUpTeal) {
+        SleepDownEditorRow(Icons.Default.MenuBook, MaterialTheme.colorScheme.primary) {
             BasicTextField(
                 value = name,
                 onValueChange = onNameChange,
                 modifier = Modifier.fillMaxWidth().height(64.dp),
                 singleLine = true,
-                textStyle = TextStyle(color = WakeUpEditorText, fontSize = 14.sp),
+                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
                 decorationBox = { innerTextField ->
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                        if (name.isBlank()) Text("课程名称", color = WakeUpEditorHint, fontSize = 14.sp)
+                        if (name.isBlank()) Text(stringResource(R.string.course_name), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                         innerTextField()
                     }
                 },
@@ -2229,32 +2456,32 @@ private fun CourseBaseEditorSection(
                 }
             }
         }
-        val selectedColor = if (color == 0) Color(0xFF3480FF) else CourseColors.asColor(color)
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_colorize_24, selectedColor, onClick = onColorClick) {
-            Text("点此更改颜色", color = selectedColor, fontSize = 14.sp)
+        val selectedColor = if (color == 0) MaterialTheme.colorScheme.primary else CourseColors.asColor(color)
+        SleepDownEditorRow(Icons.Default.Palette, selectedColor, onClick = onColorClick) {
+            Text(stringResource(R.string.change_color), color = selectedColor, fontSize = 14.sp)
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_assistant_photo_24, WakeUpBlue, onClick = onCreditClick) {
+        SleepDownEditorRow(Icons.Default.Star, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onCreditClick) {
             Text(
-                if (credit.isBlank()) "学分（可不填）" else "$credit 学分",
-                color = if (credit.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                if (credit.isBlank()) stringResource(R.string.credit_optional) else stringResource(R.string.credit_display, credit),
+                color = if (credit.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
             )
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_sticky_note_2_24, WakeUpYellow, onClick = onNoteClick) {
+        SleepDownEditorRow(Icons.Default.StickyNote2, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onNoteClick) {
             Text(
-                if (note.isBlank()) "备注（可不填）" else note,
-                color = if (note.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                if (note.isBlank()) stringResource(R.string.note_optional) else note,
+                color = if (note.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
                 maxLines = 1,
             )
         }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = WakeUpEditorDivider)
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
 @Composable
-private fun WakeUpEditorRow(
-    iconRes: Int,
+private fun SleepDownEditorRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     iconTint: Color,
     onClick: (() -> Unit)? = null,
     content: @Composable RowScope.() -> Unit,
@@ -2267,7 +2494,7 @@ private fun WakeUpEditorRow(
             .padding(start = 0.dp, end = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(painterResource(iconRes), contentDescription = null, tint = iconTint, modifier = Modifier.size(56.dp).padding(16.dp))
+        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(56.dp).padding(16.dp))
         content()
     }
 }
@@ -2283,40 +2510,49 @@ private fun TimeDraftEditor(
     onTeacher: () -> Unit,
     onRoom: () -> Unit,
     teacher: String,
-    onCustomTimeInfo: () -> Unit,
+    onDialogVisibilityChanged: (Boolean) -> Unit,
 ) {
     var weekDialog by remember(draft.id, index) { mutableStateOf(false) }
     var timeDialog by remember(draft.id, index) { mutableStateOf(false) }
     var customTimeField by remember(draft.id, index) { mutableStateOf<String?>(null) }
+    if (weekDialog || timeDialog || customTimeField != null) {
+        DisposableEffect(Unit) {
+            onDialogVisibilityChanged(true)
+            onDispose { onDialogVisibilityChanged(false) }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(modifier = Modifier.fillMaxWidth().height(43.dp)) {
-            Text("时间段", modifier = Modifier.padding(start = 16.dp, top = 24.dp), color = WakeUpEditorText, fontSize = 12.sp)
+            Text(stringResource(R.string.time_slot), modifier = Modifier.padding(start = 16.dp, top = 24.dp), color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
             IconButton(
                 onClick = onRemove,
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp).size(32.dp),
             ) {
-                Icon(Icons.Default.Close, contentDescription = "删除时间段", tint = WakeUpEditorText, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.delete_time_slot), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
             }
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_today_24, WakeUpTeal, onClick = { weekDialog = true }) {
-            Text(selectedWeekLabel(draft.selectedWeeks, table.maxWeek), color = WakeUpEditorText, fontSize = 14.sp)
+        SleepDownEditorRow(Icons.Default.CalendarMonth, MaterialTheme.colorScheme.primary, onClick = { weekDialog = true }) {
+            Text(selectedWeekLabel(draft.selectedWeeks, table.maxWeek), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_access_time_24, WakeUpOrange, onClick = { timeDialog = true }) {
-            Text(timeRowLabel(draft), color = WakeUpEditorText, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        SleepDownEditorRow(Icons.Default.AccessTime, MaterialTheme.colorScheme.primary, onClick = { timeDialog = true }) {
+            Text(timeRowLabel(draft), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("自定义时间", color = if (draft.ownTime) WakeUpEditorText else WakeUpEditorHint, fontSize = 14.sp)
+                Text(stringResource(R.string.custom_time), color = if (draft.ownTime) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 Checkbox(
                     checked = draft.ownTime,
-                    onCheckedChange = {
-                        if (it) onCustomTimeInfo()
-                        onChange(draft.copy(ownTime = it))
+                    onCheckedChange = { checked ->
+                        onChange(draft.copy(
+                            ownTime = checked,
+                            startTime = draft.startTime.ifBlank { nodeTimes.firstOrNull { it.node == draft.startNode }?.start.orEmpty() },
+                            endTime = draft.endTime.ifBlank { nodeTimes.firstOrNull { it.node == draft.startNode + draft.step - 1 }?.end.orEmpty() },
+                        ))
                     },
                     modifier = Modifier.size(36.dp),
                     colors = CheckboxDefaults.colors(
-                        checkedColor = WakeUpTeal,
-                        uncheckedColor = Color(0xFF5C5962),
-                        checkmarkColor = Color.White,
+                        checkedColor = MaterialTheme.colorScheme.primary,
+                        uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        checkmarkColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                 )
             }
@@ -2326,22 +2562,22 @@ private fun TimeDraftEditor(
                 modifier = Modifier.fillMaxWidth().padding(start = 104.dp, end = 24.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = { customTimeField = "start" }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { "上课时间" }) }
-                OutlinedButton(onClick = { customTimeField = "end" }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { "下课时间" }) }
+                OutlinedButton(onClick = { customTimeField = "start" }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { stringResource(R.string.class_start_time) }) }
+                OutlinedButton(onClick = { customTimeField = "end" }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { stringResource(R.string.class_end_time) }) }
             }
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_person_24, WakeUpBlue, onClick = onTeacher) {
+        SleepDownEditorRow(Icons.Default.Person, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onTeacher) {
             Text(
-                if (teacher.isBlank()) "授课老师（可不填）" else teacher,
-                color = if (teacher.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                if (teacher.isBlank()) stringResource(R.string.teacher_optional) else teacher,
+                color = if (teacher.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
                 maxLines = 1,
             )
         }
-        WakeUpEditorRow(R.drawable.sd_ic_twotone_meeting_room_24, WakeUpRed, onClick = onRoom) {
+        SleepDownEditorRow(Icons.Default.Place, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onRoom) {
             Text(
-                if (draft.room.isBlank()) "上课地点（可不填）" else draft.room,
-                color = if (draft.room.isBlank()) WakeUpEditorHint else WakeUpEditorText,
+                if (draft.room.isBlank()) stringResource(R.string.room_optional) else draft.room,
+                color = if (draft.room.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
                 maxLines = 1,
             )
@@ -2349,27 +2585,38 @@ private fun TimeDraftEditor(
     }
 
     if (weekDialog) {
+        var selected by remember { mutableStateOf(draft.selectedWeeks) }
+        val all = (1..table.maxWeek).toSet()
+        val odd = all.filter { it % 2 == 1 }.toSet()
+        val even = all.filter { it % 2 == 0 }.toSet()
         AlertDialog(
             onDismissRequest = { weekDialog = false },
-            title = { Text("选择周数") },
+            title = { Text(stringResource(R.string.select_week_count)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WeekNumberGrid(maxWeek = table.maxWeek, selected = draft.selectedWeeks, onChange = { onChange(draft.copy(selectedWeeks = it)) })
+                    WeekNumberGrid(maxWeek = table.maxWeek, selected = selected, onChange = { selected = it })
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WeekTypeButton("每周", draft.weekType == CourseTimeEntity.TYPE_ALL, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ALL, selectedWeeks = (1..table.maxWeek).toSet())) }, Modifier.weight(1f))
-                        WeekTypeButton("单周", draft.weekType == CourseTimeEntity.TYPE_ODD, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_ODD, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 1 }.toSet())) }, Modifier.weight(1f))
-                        WeekTypeButton("双周", draft.weekType == CourseTimeEntity.TYPE_EVEN, { onChange(draft.copy(weekType = CourseTimeEntity.TYPE_EVEN, selectedWeeks = (1..table.maxWeek).filter { it % 2 == 0 }.toSet())) }, Modifier.weight(1f))
+                        WeekTypeButton(stringResource(R.string.every_week), selected == all, { selected = all }, Modifier.weight(1f))
+                        WeekTypeButton(stringResource(R.string.odd_week), selected == odd, { selected = odd }, Modifier.weight(1f))
+                        WeekTypeButton(stringResource(R.string.even_week), selected == even, { selected = even }, Modifier.weight(1f))
                     }
+                    if (selected.isEmpty()) Text(stringResource(R.string.week_required), color = MaterialTheme.colorScheme.error)
                 }
             },
-            confirmButton = { TextButton(onClick = { weekDialog = false }) { Text("完成") } },
+            confirmButton = {
+                TextButton(enabled = selected.isNotEmpty(), onClick = {
+                    onChange(draft.copy(selectedWeeks = selected))
+                    weekDialog = false
+                }) { Text(stringResource(R.string.confirm)) }
+            },
+            dismissButton = { TextButton(onClick = { weekDialog = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
     if (timeDialog) {
         TimeSelectionDialog(
             draft = draft,
             maxNode = table.nodeCount.coerceIn(1, 60),
-            onChange = onChange,
+            onChange = { onChange(it); timeDialog = false },
             onDismiss = { timeDialog = false },
         )
     }
@@ -2385,8 +2632,15 @@ private fun TimeDraftEditor(
     }
 }
 
+@Composable
 private fun timeRowLabel(draft: TimeDraft): String =
-    "周${weekdayName(draft.day)}    第${draft.startNode} - ${draft.startNode + draft.step - 1}节"
+    stringResource(
+        R.string.time_summary,
+        stringResource(R.string.weekday_with_prefix, weekdayName(draft.day)),
+        draft.startNode,
+        draft.startNode + draft.step - 1,
+        "",
+    )
 
 @Composable
 private fun TimeSelectionDialog(
@@ -2395,17 +2649,23 @@ private fun TimeSelectionDialog(
     onChange: (TimeDraft) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var working by remember { mutableStateOf(draft) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择上课时间") },
+        title = { Text(stringResource(R.string.select_class_time)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TimeChoiceMenuRow("星期", "周${weekdayName(draft.day)}", (1..7).map { it to "周${weekdayName(it)}" }) { onChange(draft.copy(day = it)) }
-                TimeChoiceMenuRow("开始节", "第${draft.startNode}节", (1..maxNode).map { it to "第${it}节" }) { value -> onChange(draft.copy(startNode = value, step = draft.step.coerceAtMost((maxNode - value + 1).coerceAtLeast(1)))) }
-                TimeChoiceMenuRow("连续节数", "${draft.step}节", (1..(maxNode - draft.startNode + 1).coerceAtLeast(1)).map { it to "${it}节" }) { onChange(draft.copy(step = it)) }
+                TimeChoiceMenuRow(stringResource(R.string.weekday), stringResource(R.string.weekday_with_prefix, weekdayName(working.day)), (1..7).map { it to stringResource(R.string.weekday_with_prefix, weekdayName(it)) }) { working = working.copy(day = it) }
+                TimeChoiceMenuRow(stringResource(R.string.start_period), stringResource(R.string.period_number, working.startNode), (1..maxNode).map { it to stringResource(R.string.period_number, it) }) { value ->
+                    working = working.copy(startNode = value, step = working.step.coerceAtMost(maxNode - value + 1))
+                }
+                TimeChoiceMenuRow(stringResource(R.string.end_period), stringResource(R.string.period_number, working.startNode + working.step - 1), (working.startNode..maxNode).map { it to stringResource(R.string.period_number, it) }) { value ->
+                    working = working.copy(step = value - working.startNode + 1)
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        confirmButton = { TextButton(onClick = { onChange(working) }) { Text(stringResource(R.string.confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2418,9 +2678,9 @@ private fun TimeChoiceMenuRow(
 ) {
     var expanded by remember(label, value) { mutableStateOf(false) }
     Row(modifier = Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = WakeUpEditorText, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Box {
-            TextButton(onClick = { expanded = true }) { Text(value, color = WakeUpTeal, fontSize = 14.sp) }
+            TextButton(onClick = { expanded = true }) { Text(value, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp) }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { (optionValue, optionLabel) ->
                     DropdownMenuItem(text = { Text(optionLabel) }, onClick = { onSelected(optionValue); expanded = false })
@@ -2432,18 +2692,20 @@ private fun TimeChoiceMenuRow(
 
 @Composable
 private fun WeekNumberGrid(maxWeek: Int, selected: Set<Int>, onChange: (Set<Int>) -> Unit) {
-    LazyVerticalGrid(columns = GridCells.Fixed(6), modifier = Modifier.fillMaxWidth().heightIn(max = 190.dp).padding(horizontal = 16.dp), userScrollEnabled = false) {
+    LazyVerticalGrid(columns = GridCells.Fixed(6), modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
         gridItems((1..maxWeek.coerceIn(1, 60)).toList()) { week ->
             Box(
                 modifier = Modifier
                     .padding(2.dp)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (week in selected) Color(0xFFFF2D55) else Color(0xFFF0F0F0))
-                    .clickable { onChange(if (week in selected) selected - week else selected + week) },
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (week in selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                    .toggleable(value = week in selected, role = Role.Checkbox) { checked ->
+                        onChange(if (checked) selected + week else selected - week)
+                    },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("$week", color = if (week in selected) Color.White else Color(0xFF626466), fontSize = 12.sp)
+                Text("$week", color = if (week in selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
             }
         }
     }
@@ -2479,14 +2741,14 @@ private fun ChoicePickerDialog(
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(label, modifier = Modifier.weight(1f))
                             if (value == selectedValue) {
-                                Icon(Icons.Default.Check, contentDescription = "已选择")
+                                Icon(Icons.Default.Check, contentDescription = stringResource(R.string.selected))
                             }
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2520,19 +2782,19 @@ private fun TimeSettingsScreen(
         return
     }
     ScreenScaffold(
-        title = "时间表",
+        title = stringResource(R.string.time_table),
         onBack = onBack,
         actions = {
-            IconButton(onClick = { addDialog = true }) { Icon(Icons.Default.Add, contentDescription = "添加节次") }
+            IconButton(onClick = { addDialog = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_period)) }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "更多") }
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more)) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("复制") }, onClick = { menu = false; onCopy() })
-                    DropdownMenuItem(text = { Text("保存") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, onClick = { menu = false; onCopy() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.save)) }, onClick = {
                         menu = false
                         scope.launch {
                             repository.saveNodeTimes(table.id, rows.map { NodeTimeEntity(it.id, table.id, it.node, it.start, it.end) })
-                            showToast(context, "保存成功")
+                            showToast(context, context.getString(R.string.save_success))
                         }
                     })
                 }
@@ -2540,42 +2802,42 @@ private fun TimeSettingsScreen(
             IconButton(onClick = {
                 scope.launch {
                     repository.saveNodeTimes(table.id, rows.map { NodeTimeEntity(it.id, table.id, it.node, it.start, effectiveEnd(it.start, it.end, uniform, duration)) })
-                    showToast(context, "保存成功")
+                    showToast(context, context.getString(R.string.save_success))
                 }
-            }) { Icon(Icons.Default.Save, contentDescription = "保存") }
+            }) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save)) }
         },
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
-                Text("要用多少节就调整多少节的时间，多余的节数忽略即可。\n如果需要单独设置某节课或某地点的时间，请直接编辑该课程，勾选「自定义时间」", modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = Color(0xFF626466), fontSize = 12.sp, lineHeight = 18.sp)
+                Text(stringResource(R.string.time_table_help), modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
             }
             item {
-                SettingsGroup("当前课表关联的时间表") {
-                    SettingRow(Icons.Default.AccessTime, "默认时间表", "点击即可编辑 · 24 小时制", tint = Color(0xFF2AA69B))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.ContentCopy, "复制时间表", "复制整张课表时会一并复制时间表", tint = Color(0xFF4E7BD9), onClick = onCopy)
+                SettingsGroup(stringResource(R.string.current_table_time_table)) {
+                    SettingRow(Icons.Default.AccessTime, stringResource(R.string.default_time_table), stringResource(R.string.time_table_edit_hint), tint = Color(0xFF2AA69B))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.ContentCopy, stringResource(R.string.copy_time_table), stringResource(R.string.copy_time_table_summary), tint = Color(0xFF4E7BD9), onClick = onCopy)
                 }
             }
             item {
-                SettingsGroup("编辑时间表") {
-                    SettingRow(Icons.Default.Tune, "每节课时长相同", trailing = { Switch(checked = uniform, onCheckedChange = { if (it) uniformConfirm = true else uniform = false }) }, onClick = { if (!uniform) uniformConfirm = true else uniform = false })
+                SettingsGroup(stringResource(R.string.edit_time_table)) {
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.same_duration), trailing = { Switch(checked = uniform, onCheckedChange = { if (it) uniformConfirm = true else uniform = false }) }, onClick = { if (!uniform) uniformConfirm = true else uniform = false })
                     if (uniform) {
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                        SettingRow(Icons.Default.AccessTime, "一节课时长", "$duration 分钟", tint = Color(0xFF4E7BD9), onClick = { addDialog = true })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingRow(Icons.Default.AccessTime, stringResource(R.string.duration), stringResource(R.string.duration_minutes, duration.toIntOrNull() ?: 50), tint = Color(0xFF4E7BD9), onClick = { addDialog = true })
                     }
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    Text("使用 24 小时制。点击每节课的开始或结束时间进行调整。", modifier = Modifier.padding(16.dp), color = Color(0xFF626466), fontSize = 12.sp)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(stringResource(R.string.time_table_24h_hint), modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
             items(rows.indices.toList(), key = { rows[it].node }) { index ->
                 val row = rows[index]
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${row.node}", modifier = Modifier.width(32.dp), fontWeight = FontWeight.Bold, color = Color(0xFF141414))
+                        Text("${row.node}", modifier = Modifier.width(32.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         OutlinedButton(onClick = { timePickerTarget = TimePickerTarget(index, isStart = true) }, modifier = Modifier.weight(1f)) { Text(row.start) }
                         Spacer(Modifier.width(8.dp))
                         OutlinedButton(onClick = { timePickerTarget = TimePickerTarget(index, isStart = false) }, modifier = Modifier.weight(1f)) { Text(row.end) }
-                        IconButton(onClick = { if (rows.size > 1) deleting = row }) { Icon(Icons.Default.Delete, contentDescription = "删除第${row.node}节", tint = if (rows.size > 1) Color(0xFFE53935) else Color.LightGray) }
+                        IconButton(onClick = { if (rows.size > 1) deleting = row }) { Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete_period, row.node), tint = if (rows.size > 1) Color(0xFFE53935) else Color.LightGray) }
                     }
                 }
             }
@@ -2583,10 +2845,10 @@ private fun TimeSettingsScreen(
     }
     if (addDialog) {
         TextInputDialog(
-            title = "添加节次 / 统一课时长度",
+            title = stringResource(R.string.add_period_or_uniform),
             initial = if (uniform) duration else "1",
             number = true,
-            validation = { value -> if (value.toIntOrNull() == null) "请输入有效数字" else null },
+            validation = { value -> if (value.toIntOrNull() == null) context.getString(R.string.invalid_number) else null },
             onConfirm = { value ->
             if (uniform) duration = value.toIntOrNull()?.coerceIn(10, 180)?.toString() ?: duration
             else {
@@ -2594,9 +2856,9 @@ private fun TimeSettingsScreen(
                     if (rows.size < TimetableRepository.MAX_NODE_COUNT) {
                         val node = repository.addNode(table.id)
                         rows += NodeDraft(node.id, node.node, node.start, node.end)
-                        showToast(context, "已添加第${node.node}节")
+                        showToast(context, context.getString(R.string.period_added, node.node))
                     } else {
-                        showToast(context, "最多支持 ${TimetableRepository.MAX_NODE_COUNT} 节")
+                        showToast(context, context.getString(R.string.max_periods, TimetableRepository.MAX_NODE_COUNT))
                     }
                 }
             }
@@ -2604,17 +2866,17 @@ private fun TimeSettingsScreen(
         }, onDismiss = { addDialog = false })
     }
     if (uniformConfirm) {
-        ConfirmDialog(title = "统一课时长度", text = "开启后，原来设置的下课时间会被覆盖。", onConfirm = { uniformConfirm = false; uniform = true }, onDismiss = { uniformConfirm = false })
+        ConfirmDialog(title = stringResource(R.string.uniform_duration), text = stringResource(R.string.uniform_duration_warning), onConfirm = { uniformConfirm = false; uniform = true }, onDismiss = { uniformConfirm = false })
     }
     deleting?.let { row ->
-        ConfirmDialog(title = "删除第${row.node}节", text = "删除后后续节次会自动前移，课程安排也会同步调整。", onConfirm = {
+        ConfirmDialog(title = stringResource(R.string.delete_period, row.node), text = stringResource(R.string.period_delete_warning), onConfirm = {
             deleting = null
             scope.launch {
                 repository.deleteNode(table.id, row.node)
                 val refreshed = nodeTimesFor(table, repository.getNodeTimes(table.id))
                 rows.clear()
                 rows.addAll(refreshed.map { NodeDraft(it.id, it.node, it.start, it.end) })
-                showToast(context, "删除成功")
+                showToast(context, context.getString(R.string.delete_success))
             }
         }, onDismiss = { deleting = null })
     }
@@ -2640,100 +2902,319 @@ private fun TimeSettingsScreen(
 }
 
 @Composable
-private fun ImportScreen(
+private fun ReminderSettingsScreen(
     repository: TimetableRepository,
-    initialUri: Uri? = null,
-    onInitialUriConsumed: () -> Unit = {},
+    tableId: Long,
     onBack: () -> Unit,
-    onJsonImported: (Long) -> Unit,
-    onCsvImported: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var type by remember { mutableStateOf("CSV") }
-    var tableName by remember { mutableStateOf("导入课表") }
+    val scheduler = remember(context) { ReminderScheduler(context) }
+    var settings by remember(tableId) { mutableStateOf(ReminderSettings()) }
+    var status by remember { mutableStateOf(scheduler.permissionStatus()) }
+    var startLead by remember(tableId) { mutableStateOf("10") }
+    var endLead by remember(tableId) { mutableStateOf("0") }
+    var message by remember { mutableStateOf<String?>(null) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        status = scheduler.permissionStatus()
+        if (granted) {
+            scope.launch {
+                runCatching { scheduler.rebuildCurrentTable() }
+                    .onSuccess { report ->
+                        status = report.permissionStatus
+                        message = if (report.usedInexactFallback) {
+                            context.getString(R.string.reminder_permission_allowed_fallback)
+                        } else {
+                            context.getString(R.string.reminder_permission_allowed_rebuilt, report.scheduledPlanIds.size)
+                        }
+                    }
+                    .onFailure { message = localizedUiError(context, it, R.string.reminder_rebuild_failed) }
+            }
+        }
+    }
+
+    LaunchedEffect(tableId) {
+        if (tableId > 0L) {
+            settings = repository.getReminderSettings(tableId)
+            startLead = settings.startLeadMinutes.toString()
+            endLead = settings.endLeadMinutes.toString()
+            status = scheduler.permissionStatus()
+        }
+    }
+
+    fun save() {
+        val startMinutes = startLead.toIntOrNull()
+        val endMinutes = endLead.toIntOrNull()
+        if (startMinutes == null || startMinutes < 0 || endMinutes == null || endMinutes < 0) {
+            message = context.getString(R.string.reminder_minutes_nonnegative)
+            return
+        }
+        val updated = settings.copy(startLeadMinutes = startMinutes, endLeadMinutes = endMinutes)
+        scope.launch {
+            runCatching {
+                repository.saveReminderSettings(tableId, updated)
+                scheduler.rebuildCurrentTable()
+            }.onSuccess { report ->
+                settings = updated
+                status = report.permissionStatus
+                message = when {
+                    report.blockedReason != null -> context.getString(R.string.reminder_saved_unavailable)
+                    report.usedInexactFallback -> context.getString(R.string.reminder_rebuilt_inexact)
+                    else -> context.getString(R.string.reminder_rebuilt_count, report.scheduledPlanIds.size)
+                }
+            }.onFailure { message = localizedUiError(context, it, R.string.reminder_save_failed) }
+        }
+    }
+
+    ScreenScaffold(
+        title = stringResource(R.string.course_reminders),
+        onBack = onBack,
+        actions = { TextButton(onClick = ::save) { Text(stringResource(R.string.save)) } },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                SettingsGroup(stringResource(R.string.system_status)) {
+                    val notificationText = when {
+                        !status.notificationPermissionGranted -> stringResource(R.string.notification_permission_required)
+                        !status.notificationsEnabled -> stringResource(R.string.notifications_disabled)
+                        else -> stringResource(R.string.notifications_available)
+                    }
+                    SettingRow(
+                        Icons.Default.Notifications,
+                        stringResource(R.string.notifications),
+                        notificationText,
+                        tint = Color(0xFF8D62C8),
+                        onClick = if (status.notificationPermissionGranted && !status.notificationsEnabled) {
+                            {
+                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                runCatching { context.startActivity(intent) }
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !status.notificationPermissionGranted) {
+                        TextButton(onClick = { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.allow_notifications)) }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(
+                        Icons.Default.AccessTime,
+                        stringResource(R.string.exact_time),
+                        if (status.exactAlarmAllowed) stringResource(R.string.available) else stringResource(R.string.inexact_time_description),
+                        tint = Color(0xFF2AA69B),
+                        onClick = {
+                            ReminderScheduler.exactAlarmSettingsIntent(context)?.let { intent ->
+                                runCatching { context.startActivity(intent) }
+                            }
+                        },
+                    )
+                    TextButton(onClick = { status = scheduler.permissionStatus() }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.refresh_system_status)) }
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.reminder_time)) {
+                    SettingRow(Icons.Default.Notifications, stringResource(R.string.start_reminder), trailing = { Switch(checked = settings.startEnabled, onCheckedChange = { settings = settings.copy(startEnabled = it) }) })
+                    OutlinedTextField(value = startLead, onValueChange = { startLead = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.minutes_before_start)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Notifications, stringResource(R.string.end_reminder), trailing = { Switch(checked = settings.endEnabled, onCheckedChange = { settings = settings.copy(endEnabled = it) }) })
+                    OutlinedTextField(value = endLead, onValueChange = { endLead = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.minutes_before_end)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp))
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.notification_content)) {
+                    SettingRow(Icons.Default.Description, stringResource(R.string.course_name), trailing = { Switch(checked = settings.content.includeCourseName, onCheckedChange = { settings = settings.copy(content = settings.content.copy(includeCourseName = it)) }) })
+                    SettingRow(Icons.Default.Person, stringResource(R.string.teacher), trailing = { Switch(checked = settings.content.includeTeacher, onCheckedChange = { settings = settings.copy(content = settings.content.copy(includeTeacher = it)) }) })
+                    SettingRow(Icons.Default.Place, stringResource(R.string.location), trailing = { Switch(checked = settings.content.includeRoom, onCheckedChange = { settings = settings.copy(content = settings.content.copy(includeRoom = it)) }) })
+                    SettingRow(Icons.Default.StickyNote2, stringResource(R.string.notes), trailing = { Switch(checked = settings.content.includeNote, onCheckedChange = { settings = settings.copy(content = settings.content.copy(includeNote = it)) }) })
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.notification_style)) {
+                    SettingRow(Icons.Default.Notifications, stringResource(R.string.vibration), trailing = { Switch(checked = settings.vibrate && !settings.silent, enabled = !settings.silent, onCheckedChange = { settings = settings.copy(vibrate = it) }) })
+                    SettingRow(Icons.Default.Notifications, stringResource(R.string.silent), trailing = { Switch(checked = settings.silent, onCheckedChange = { settings = settings.copy(silent = it) }) })
+                }
+            }
+            message?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp) } }
+        }
+    }
+}
+
+@Composable
+private fun ImportScreen(
+    repository: TimetableRepository,
+    currentTableId: Long,
+    initialUri: Uri? = null,
+    onInitialUriConsumed: () -> Unit = {},
+    onBack: () -> Unit,
+    onImported: (Long) -> Unit,
+) {
+    val context = LocalContext.current
+    val adapter = remember(repository, context) { ImportExportAdapter(context, repository) }
+    var format by remember { mutableStateOf(ImportFormat.CSV) }
+    var target by remember { mutableStateOf(ImportTarget.CREATE_NEW) }
+    val defaultImportTableName = stringResource(R.string.import_default_table_name)
+    var tableName by remember(defaultImportTableName) { mutableStateOf(defaultImportTableName) }
     var startDate by remember { mutableStateOf(LocalDate.now().with(java.time.DayOfWeek.MONDAY).toString()) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    var sharedFileUri by remember { mutableStateOf<Uri?>(null) }
     var notice by remember { mutableStateOf<ImportNotice?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var confirmReplace by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { pendingUri = it }
 
     LaunchedEffect(initialUri) {
         if (initialUri != null) {
-            pendingUri = initialUri
+            try {
+                val detected = adapter.detectFormat(initialUri)
+                if (detected != null) {
+                    format = detected
+                    pendingUri = initialUri
+                    sharedFileUri = null
+                } else {
+                    sharedFileUri = initialUri
+                    notice = ImportNotice(context.getString(R.string.file_format), context.getString(R.string.import_choose_format)) {}
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                sharedFileUri = initialUri
+                notice = ImportNotice(context.getString(R.string.import_failed), localizedUiError(context, error, R.string.file_import_failed)) {}
+            }
             onInitialUriConsumed()
         }
     }
 
-    LaunchedEffect(pendingUri, type) {
+    LaunchedEffect(pendingUri) {
         val uri = pendingUri ?: return@LaunchedEffect
-        pendingUri = null
-        val text = runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: error("无法读取文件")
-        }.getOrElse {
-            notice = ImportNotice("导入失败", it.message ?: "读取文件失败") {}
+        val importTarget = target
+        val firstDay = if (format == ImportFormat.CSV) Weeks.parseDate(startDate) else null
+        if (format == ImportFormat.CSV && firstDay == null) {
+            pendingUri = null
+            notice = ImportNotice(context.getString(R.string.import_failed), context.getString(R.string.date_format_error)) {}
             return@LaunchedEffect
         }
         loading = true
-        scope.launch {
-            if (type == "CSV") {
-                val date = Weeks.parseDate(startDate)
-                if (date == null) {
-                    notice = ImportNotice("导入失败", "日期格式应为 yyyy-MM-dd") {}
-                } else {
-                    repository.importCsv(tableName.ifBlank { "导入课表" }, date.toEpochDay(), text)
-                        .onSuccess { count ->
-                            notice = ImportNotice("导入成功", "已导入 $count 条课程记录") { onCsvImported() }
-                        }
-                        .onFailure { error ->
-                            notice = ImportNotice("导入失败", error.message ?: "CSV 导入失败") {}
-                        }
-                }
-            } else {
-                repository.importBackup(text)
-                    .onSuccess { id ->
-                        notice = ImportNotice("导入成功", "JSON 课表已导入") { onJsonImported(id) }
-                    }
-                    .onFailure { error ->
-                        notice = ImportNotice("导入失败", error.message ?: "JSON 导入失败") {}
-                    }
+        runCatching {
+            adapter.importFile(
+                uri = uri,
+                format = format,
+                target = importTarget,
+                currentTableId = currentTableId.takeIf { it > 0L },
+                options = ImportOptions(
+                    name = tableName.trim().ifBlank { context.getString(R.string.import_default_table_name) },
+                    firstDayEpochDay = firstDay?.toEpochDay(),
+                ),
+            )
+        }.onSuccess { result ->
+            val action = when (importTarget) {
+                ImportTarget.CREATE_NEW -> context.getString(R.string.created_new_table)
+                ImportTarget.MERGE_CURRENT -> context.getString(R.string.merged_current_table)
+                ImportTarget.REPLACE_CURRENT -> context.getString(R.string.replaced_current_table)
             }
-            loading = false
+            notice = ImportNotice(context.getString(R.string.import_succeeded), action) { onImported(result.tableId) }
+        }.onFailure { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            notice = ImportNotice(context.getString(R.string.import_failed), localizedUiError(context, error, R.string.file_import_failed)) {}
         }
+        loading = false
+        pendingUri = null
     }
 
-    ScreenScaffold(title = "导入课表", onBack = onBack) { padding ->
+    fun selectFile() {
+        sharedFileUri?.let {
+            pendingUri = it
+            sharedFileUri = null
+            return
+        }
+        val mimeTypes = when (format) {
+            ImportFormat.CSV -> arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/vnd.ms-excel")
+            ImportFormat.JSON -> arrayOf("application/json", "text/plain")
+            ImportFormat.WAKE_UP -> arrayOf("text/plain", "application/octet-stream")
+            ImportFormat.ICS -> arrayOf("text/calendar", "text/plain")
+        }
+        launcher.launch(mimeTypes)
+    }
+
+    ScreenScaffold(title = stringResource(R.string.import_timetable), onBack = onBack) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
+                Text(stringResource(R.string.file_format), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WeekTypeButton("CSV", type == "CSV", { type = "CSV" }, Modifier.weight(1f))
-                    WeekTypeButton("JSON 备份", type == "JSON", { type = "JSON" }, Modifier.weight(1f))
+                    WeekTypeButton("CSV", format == ImportFormat.CSV, { format = ImportFormat.CSV }, Modifier.weight(1f))
+                    WeekTypeButton("JSON", format == ImportFormat.JSON, { format = ImportFormat.JSON }, Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WeekTypeButton(stringResource(R.string.wakeup_backup), format == ImportFormat.WAKE_UP, { format = ImportFormat.WAKE_UP }, Modifier.weight(1f))
+                    WeekTypeButton("ICS", format == ImportFormat.ICS, { format = ImportFormat.ICS }, Modifier.weight(1f))
                 }
             }
-            if (type == "CSV") {
+            item {
+                Text(stringResource(R.string.import_mode), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    WeekTypeButton(stringResource(R.string.create_new_table), target == ImportTarget.CREATE_NEW, { target = ImportTarget.CREATE_NEW }, Modifier.weight(1f))
+                    WeekTypeButton(stringResource(R.string.merge_current), target == ImportTarget.MERGE_CURRENT, { target = ImportTarget.MERGE_CURRENT }, Modifier.weight(1f))
+                    WeekTypeButton(stringResource(R.string.replace_current), target == ImportTarget.REPLACE_CURRENT, { target = ImportTarget.REPLACE_CURRENT }, Modifier.weight(1f))
+                }
+            }
+            if (format == ImportFormat.CSV) {
                 item {
-                    SettingsGroup("WakeUp CSV") {
-                        Text("列顺序：课程名称、星期、开始节数、结束节数、老师、地点、周数", modifier = Modifier.padding(16.dp), color = Color(0xFF626466), fontSize = 12.sp)
-                        OutlinedTextField(value = tableName, onValueChange = { tableName = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text("新课表名称") }, singleLine = true)
-                        OutlinedTextField(value = startDate, onValueChange = { startDate = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text("第一周的第一天") }, singleLine = true)
+                    SettingsGroup(stringResource(R.string.csv_file)) {
+                        Text(stringResource(R.string.csv_column_order), modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        OutlinedTextField(value = tableName, onValueChange = { tableName = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text(stringResource(R.string.table_name)) }, singleLine = true)
+                        OutlinedTextField(value = startDate, onValueChange = { startDate = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text(stringResource(R.string.first_monday)) }, singleLine = true)
                         Spacer(Modifier.height(8.dp))
                     }
                 }
             } else {
                 item {
-                    SettingsGroup("JSON 备份") {
-                        SettingRow(Icons.Default.Description, "导入本应用导出的单张课表备份文件", "导入后会创建一张新的课表", tint = Color(0xFF4E7BD9))
+                    SettingsGroup(
+                        when (format) {
+                            ImportFormat.JSON -> stringResource(R.string.sleepdown_json_backup)
+                            ImportFormat.WAKE_UP -> stringResource(R.string.wakeup_five_line_backup)
+                            ImportFormat.ICS -> stringResource(R.string.ics_calendar)
+                            ImportFormat.CSV -> stringResource(R.string.csv_file)
+                        },
+                    ) {
+                        val message = when (format) {
+                            ImportFormat.JSON -> stringResource(R.string.json_import_description)
+                            ImportFormat.WAKE_UP -> stringResource(R.string.wakeup_import_description)
+                            ImportFormat.ICS -> stringResource(R.string.ics_import_description)
+                            ImportFormat.CSV -> ""
+                        }
+                        Text(message, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
             }
             item {
-                Button(onClick = { launcher.launch(arrayOf("text/*", "application/json", "application/octet-stream")) }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (target == ImportTarget.REPLACE_CURRENT) confirmReplace = true else selectFile() },
+                    enabled = !loading && (target == ImportTarget.CREATE_NEW || currentTableId > 0L),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Icon(Icons.Default.FileUpload, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (loading) "正在导入…" else "选择文件")
+                    Text(stringResource(if (loading) R.string.importing else if (sharedFileUri != null) R.string.import_selected_file else R.string.choose_file))
                 }
             }
         }
+    }
+    if (confirmReplace) {
+        AlertDialog(
+            onDismissRequest = { confirmReplace = false },
+            title = { Text(stringResource(R.string.replace_current_title)) },
+            text = { Text(stringResource(R.string.replace_current_message)) },
+            confirmButton = { TextButton(onClick = { confirmReplace = false; selectFile() }) { Text(stringResource(R.string.continue_choose_file)) } },
+            dismissButton = { TextButton(onClick = { confirmReplace = false }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
     notice?.let { current ->
         AlertDialog(
@@ -2744,7 +3225,7 @@ private fun ImportScreen(
                 TextButton(onClick = {
                     notice = null
                     current.onConfirm()
-                }) { Text("知道了") }
+                }) { Text(stringResource(R.string.got_it)) }
             },
         )
     }
@@ -2758,26 +3239,26 @@ private fun WidgetHelpScreen(onBack: () -> Unit) {
         val manager = AppWidgetManager.getInstance(context)
         if (manager.isRequestPinAppWidgetSupported) {
             manager.requestPinAppWidget(ComponentName(context, receiver), null, null)
-            pinMessage = "请在桌面确认添加；系统会在添加时打开配置页。"
+            pinMessage = context.getString(R.string.pin_widget_message)
         } else {
-            pinMessage = "当前桌面不支持从应用内添加，请从桌面小工具列表中选择 SleepDown。"
+            pinMessage = context.getString(R.string.pin_widget_unsupported)
         }
     }
 
-    ScreenScaffold(title = "桌面小部件", onBack = onBack) { padding ->
+    ScreenScaffold(title = stringResource(R.string.widgets), onBack = onBack) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 item {
-                    SettingsGroup("添加小部件") {
-                        SettingRow(Icons.Default.Today, "今日课程（紧凑）", "按时间顺序显示今天的课程，适合较小的桌面区域。", tint = Color(0xFF4E7BD9), onClick = { requestPin(com.letr.sleepdown.widget.ScheduleWidgetReceiver::class.java) })
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                        SettingRow(Icons.Default.List, "今日课程", "按时间顺序显示今天的课程，并显示时间、地点和老师。", tint = Color(0xFF2AA69B), onClick = { requestPin(com.letr.sleepdown.widget.TodayCourseWidgetReceiver::class.java) })
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                        SettingRow(Icons.Default.Widgets, "今日课程（宽屏）", "在较宽的小部件中显示更多今日课程。", tint = Color(0xFF8D62C8), onClick = { requestPin(com.letr.sleepdown.widget.TodayModernWidgetReceiver::class.java) })
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                        SettingRow(Icons.Default.DateRange, "今日和明日", "同时显示今天与明天的课程。", tint = Color(0xFFFF8A00), onClick = { requestPin(com.letr.sleepdown.widget.TodayAndNextDayWidgetReceiver::class.java) })
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                        SettingRow(Icons.Default.TableView, "周课表", "按星期分栏显示当前周课程。", tint = Color(0xFFE53935), onClick = { requestPin(com.letr.sleepdown.widget.WeekScheduleWidgetReceiver::class.java) })
+                    SettingsGroup(stringResource(R.string.add_widget)) {
+                        SettingRow(Icons.Default.Today, stringResource(R.string.nearby_courses), stringResource(R.string.nearby_courses_description), tint = Color(0xFF4E7BD9), onClick = { requestPin(com.letr.sleepdown.widget.ScheduleWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingRow(Icons.Default.List, stringResource(R.string.today_courses), stringResource(R.string.today_courses_description), tint = Color(0xFF2AA69B), onClick = { requestPin(com.letr.sleepdown.widget.TodayCourseWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingRow(Icons.Default.Widgets, stringResource(R.string.wide_today_courses), stringResource(R.string.wide_today_courses_description), tint = Color(0xFF8D62C8), onClick = { requestPin(com.letr.sleepdown.widget.TodayModernWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingRow(Icons.Default.DateRange, stringResource(R.string.two_column_today_courses), stringResource(R.string.two_column_today_courses_description), tint = Color(0xFFFF8A00), onClick = { requestPin(com.letr.sleepdown.widget.TodayAndNextDayWidgetReceiver::class.java) })
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingRow(Icons.Default.TableView, stringResource(R.string.week_courses), stringResource(R.string.week_courses_description), tint = Color(0xFFE53935), onClick = { requestPin(com.letr.sleepdown.widget.WeekScheduleWidgetReceiver::class.java) })
                     }
                 }
                 pinMessage?.let { message ->
@@ -2785,14 +3266,14 @@ private fun WidgetHelpScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                SettingsGroup("使用说明") {
-                    SettingRow(Icons.Default.HelpOutline, "如何添加小部件？", "长按桌面空白处，选择小部件，找到 SleepDown 后添加。添加过程中会选择要显示的课表。", tint = Color(0xFF2AA69B))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Tune, "如何调整小部件大小？", "长按桌面上的小部件后拖动边缘调整大小，具体操作取决于桌面应用。", tint = Color(0xFF8D62C8))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Palette, "如何更换显示的课表？", "删除后重新添加小部件，并在配置页面选择另一张课表。", tint = Color(0xFFFF8A00))
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE8E8E8))
-                    SettingRow(Icons.Default.Refresh, "小部件什么时候更新？", "修改课程、课表或时间表后会刷新已添加的小部件；系统也会定期检查，桌面应用可能有额外的刷新限制。", tint = Color(0xFF4E7BD9))
+                SettingsGroup(stringResource(R.string.usage)) {
+                    SettingRow(Icons.Default.HelpOutline, stringResource(R.string.how_to_add_widget), stringResource(R.string.how_to_add_widget_description), tint = Color(0xFF2AA69B))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.how_to_resize_widget), stringResource(R.string.how_to_resize_widget_description), tint = Color(0xFF8D62C8))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.how_to_reconfigure_widget), stringResource(R.string.how_to_reconfigure_widget_description), tint = Color(0xFFFF8A00))
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.Refresh, stringResource(R.string.widget_update_time), stringResource(R.string.widget_update_time_description), tint = Color(0xFF4E7BD9))
                 }
             }
         }
@@ -2804,16 +3285,16 @@ private fun EmptyState(title: String, message: String, onAction: () -> Unit, pad
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(54.dp), tint = Color(0xFFFF2D55))
         Spacer(Modifier.height(16.dp))
-        Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF141414))
-        Text(message, color = Color(0xFF626466), fontSize = 13.sp)
+        Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         Spacer(Modifier.height(20.dp))
-        Button(onClick = onAction) { Icon(Icons.Default.Add, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("新建") }
+        Button(onClick = onAction) { Icon(Icons.Default.Add, contentDescription = null); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.new_label)) }
     }
 }
 
 @Composable
 private fun LoadingView() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("正在加载…", color = Color(0xFF626466)) }
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(stringResource(R.string.loading), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @Composable
@@ -2851,12 +3332,12 @@ private fun TextInputDialog(
         confirmButton = {
             TextButton(onClick = {
                 validation(value)?.let { validationError = it } ?: onConfirm(value)
-            }) { Text("确定") }
+            }) { Text(stringResource(R.string.confirm)) }
         },
         dismissButton = {
             Row {
-                if (clearable && onClear != null) TextButton(onClick = onClear) { Text("清除") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                if (clearable && onClear != null) TextButton(onClick = onClear) { Text(stringResource(R.string.clear)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
             }
         },
     )
@@ -2877,21 +3358,21 @@ private fun ColorChoiceDialog(
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (includeAuto) {
                     Surface(modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSelect(0) }, color = Color.White, border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBDBDBD))) {
-                        Box(contentAlignment = Alignment.Center) { Text("自", fontSize = 12.sp, color = Color(0xFF626466)) }
+                        Box(contentAlignment = Alignment.Center) { Text(stringResource(R.string.auto_color), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
                 (listOf(Color.Black.toArgbCompat(), Color.White.toArgbCompat()) + CourseColors.all()).distinct().forEach { color ->
-                    Surface(modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSelect(color) }, color = CourseColors.asColor(color), border = androidx.compose.foundation.BorderStroke(if (color == initial) 3.dp else 1.dp, if (color == initial) Color(0xFF141414) else Color(0xFFDDDDDD))) {}
+                    Surface(modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSelect(color) }, color = CourseColors.asColor(color), border = androidx.compose.foundation.BorderStroke(if (color == initial) 3.dp else 1.dp, if (color == initial) MaterialTheme.colorScheme.onSurface else Color(0xFFDDDDDD))) {}
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
 @Composable
 private fun ConfirmDialog(title: String, text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) }, confirmButton = { TextButton(onClick = onConfirm) { Text("确定") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(text) }, confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.confirm)) } }, dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2904,16 +3385,16 @@ private fun DatePickerDialogFor(value: Long, onSelected: (LocalDate) -> Unit, on
     val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择日期") },
+        title = { Text(stringResource(R.string.select_date)) },
         text = { DatePicker(state = state) },
         confirmButton = {
             TextButton(onClick = {
                 state.selectedDateMillis?.let { millis ->
                     onSelected(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate())
                 } ?: onDismiss()
-            }) { Text("确定") }
+            }) { Text(stringResource(R.string.confirm)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2928,14 +3409,14 @@ private fun TimePickerDialogFor(value: String, onSelected: (String) -> Unit, onD
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择时间") },
+        title = { Text(stringResource(R.string.select_time)) },
         text = { TimePicker(state = state) },
         confirmButton = {
             TextButton(onClick = {
                 onSelected("%02d:%02d".format(Locale.US, state.hour, state.minute))
-            }) { Text("确定") }
+            }) { Text(stringResource(R.string.confirm)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -2957,59 +3438,48 @@ private fun showToast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 
-private fun defaultTimeDraft(maxWeek: Int, day: Int, startNode: Int, step: Int = 2) = TimeDraft(day = day.coerceIn(1, 7), startNode = startNode.coerceAtLeast(1), step = step.coerceAtLeast(1), selectedWeeks = (1..maxWeek.coerceAtLeast(1)).toSet())
-
-private fun selectedWeeks(time: CourseTimeEntity, maxWeek: Int): Set<Int> = (time.startWeek..time.endWeek).filter { week -> Weeks.inWeek(time.startWeek, time.endWeek, time.weekType, week) && week in 1..maxWeek }.toSet()
-
-private fun TimeDraft.toEntities(courseId: Long): List<CourseTimeEntity> {
-    val weeks = selectedWeeks.filter { it > 0 }.sorted()
-    if (weeks.isEmpty()) return emptyList()
-    val groups = mutableListOf<Pair<Int, Int>>()
-    var start = weeks.first()
-    var previous = start
-    val stride = if (weekType == CourseTimeEntity.TYPE_ALL) 1 else 2
-    for (week in weeks.drop(1)) {
-        if (week != previous + stride) {
-            groups += start to previous
-            start = week
-        }
-        previous = week
-    }
-    groups += start to previous
-    return groups.mapIndexed { index, (from, to) ->
-        CourseTimeEntity(id = if (index == 0) id else 0L, courseId = courseId, day = day, startNode = startNode, step = step, startWeek = from, endWeek = to, weekType = weekType, room = room, ownTime = ownTime, startTime = startTime, endTime = endTime)
-    }
-}
-
+@Composable
 private fun timeSummary(draft: TimeDraft, nodeTimes: List<NodeTimeEntity>): String {
-    val day = "周${weekdayName(draft.day)}"
-    val clock = if (draft.ownTime && draft.startTime.isNotBlank() && draft.endTime.isNotBlank()) "${draft.startTime}-${draft.endTime}" else {
+    val day = stringResource(R.string.weekday_with_prefix, weekdayName(draft.day))
+    val clock = if (draft.ownTime && draft.startTime.isNotBlank() && draft.endTime.isNotBlank()) {
+        "${draft.startTime}-${draft.endTime}"
+    } else {
         val start = nodeTimes.firstOrNull { it.node == draft.startNode }?.start.orEmpty()
         val end = nodeTimes.firstOrNull { it.node == draft.startNode + draft.step - 1 }?.end.orEmpty()
         if (start.isNotBlank() && end.isNotBlank()) "$start-$end" else ""
     }
-    return "$day    第${draft.startNode} - ${draft.startNode + draft.step - 1}节${if (clock.isBlank()) "" else " · $clock"}"
+    val clockSuffix = if (clock.isBlank()) "" else stringResource(R.string.time_summary_clock_suffix, clock)
+    return stringResource(R.string.time_summary, day, draft.startNode, draft.startNode + draft.step - 1, clockSuffix)
 }
 
+@Composable
 private fun selectedWeekLabel(selected: Set<Int>, maxWeek: Int): String {
-    if (selected.isEmpty()) return "未选择"
+    if (selected.isEmpty()) return stringResource(R.string.not_selected)
     val values = selected.filter { it in 1..maxWeek }.sorted()
-    if (values.isEmpty()) return "未选择"
-    if (values.size == maxWeek && values.first() == 1 && values.last() == maxWeek) return "第1 - ${maxWeek}周"
+    if (values.isEmpty()) return stringResource(R.string.not_selected)
+    if (values.size == maxWeek && values.first() == 1 && values.last() == maxWeek) {
+        return stringResource(R.string.full_week_range, maxWeek)
+    }
     val contiguous = values.zipWithNext().all { (left, right) -> right == left + 1 }
     return if (contiguous) {
-        "第${values.first()} - ${values.last()}周"
+        stringResource(R.string.week_range, values.first(), values.last())
     } else if (values.size <= 4) {
-        values.joinToString("、") { "第${it}周" }
+        stringResource(R.string.selected_week_list, values.joinToString(stringResource(R.string.list_separator)))
     } else {
-        "已选 ${values.size} 周"
+        stringResource(R.string.selected_weeks_count, values.size)
     }
 }
 
+@Composable
 private fun courseTimeLabel(time: CourseTimeEntity, nodeTimes: List<NodeTimeEntity>): String {
     val start = nodeTimes.firstOrNull { it.node == time.startNode }?.start.orEmpty()
     val end = nodeTimes.firstOrNull { it.node == time.startNode + time.step - 1 }?.end.orEmpty()
-    return "第${time.startNode}-${time.startNode + time.step - 1}节" + if (start.isNotBlank() && end.isNotBlank()) " $start-$end" else ""
+    val periods = stringResource(R.string.period_range, time.startNode, time.startNode + time.step - 1)
+    return if (start.isNotBlank() && end.isNotBlank()) {
+        stringResource(R.string.period_range_with_clock, periods, "$start-$end")
+    } else {
+        periods
+    }
 }
 
 private fun courseColor(course: CourseEntity): Int = if (course.color == 0) CourseColors.colorFor(course.name) else course.color
@@ -3021,12 +3491,7 @@ private fun currentWeek(table: TableEntity): Int {
 
 private fun dateFor(table: TableEntity, week: Int, day: Int): LocalDate {
     val base = LocalDate.ofEpochDay(table.startDate)
-    val offset = if (table.sundayFirst) {
-        if (day == 7) 0 else day
-    } else {
-        day - 1
-    }
-    return base.plusWeeks((week - 1).toLong()).plusDays(offset.toLong())
+    return base.plusWeeks((week - 1).toLong()).plusDays((day - 1).toLong())
 }
 
 private fun nodeTimesFor(table: TableEntity, source: List<NodeTimeEntity>): List<NodeTimeEntity> {
@@ -3041,7 +3506,23 @@ private fun visibleDays(table: TableEntity): List<Int> {
     return ordered.filter { day -> when (day) { 6 -> table.showSat; 7 -> table.showSun; else -> true } }
 }
 
-private fun weekdayName(day: Int): String = listOf("一", "二", "三", "四", "五", "六", "日")[((day - 1) % 7 + 7) % 7]
+@Composable
+private fun weekdayName(day: Int): String = when (((day - 1) % 7 + 7) % 7) {
+    0 -> stringResource(R.string.weekday_short_monday)
+    1 -> stringResource(R.string.weekday_short_tuesday)
+    2 -> stringResource(R.string.weekday_short_wednesday)
+    3 -> stringResource(R.string.weekday_short_thursday)
+    4 -> stringResource(R.string.weekday_short_friday)
+    5 -> stringResource(R.string.weekday_short_saturday)
+    else -> stringResource(R.string.weekday_short_sunday)
+}
+
+@Composable
+private fun weekTypeLabel(type: Int): String = when (type) {
+    CourseTimeEntity.TYPE_ODD -> stringResource(R.string.odd_week)
+    CourseTimeEntity.TYPE_EVEN -> stringResource(R.string.even_week)
+    else -> stringResource(R.string.every_week)
+}
 
 private fun blend(foreground: Color, background: Color): Color {
     val alpha = foreground.alpha + background.alpha * (1f - foreground.alpha)
@@ -3067,6 +3548,13 @@ private fun parseTime(value: String): LocalTime = runCatching { LocalTime.parse(
 private fun addMinutes(value: String, minutes: Int): String = parseTime(value).plusMinutes(minutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
 
 private fun effectiveEnd(start: String, end: String, uniform: Boolean, duration: String): String = if (uniform && start.isNotBlank()) addMinutes(start, duration.toIntOrNull() ?: 50) else end
+
+private fun customTimeRangeValid(start: String, end: String): Boolean {
+    if (start.isBlank() || end.isBlank()) return false
+    val startTime = runCatching { LocalTime.parse(start, DateTimeFormatter.ofPattern("H:mm")) }.getOrNull() ?: return false
+    val endTime = runCatching { LocalTime.parse(end, DateTimeFormatter.ofPattern("H:mm")) }.getOrNull() ?: return false
+    return startTime.isBefore(endTime)
+}
 
 private fun Color.toArgbCompat(): Int {
     val red = (red * 255f).toInt().coerceIn(0, 255)

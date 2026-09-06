@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.android.library)
     alias(libs.plugins.compose.multiplatform)
 }
@@ -17,6 +18,7 @@ kotlin {
     listOf(
         iosArm64(),
         iosSimulatorArm64(),
+        iosX64(),
     ).forEach { target ->
         target.binaries.framework {
             baseName = "shared"
@@ -30,6 +32,11 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material3)
             implementation(compose.ui)
+            implementation(libs.kotlinx.serialization.json)
+        }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }

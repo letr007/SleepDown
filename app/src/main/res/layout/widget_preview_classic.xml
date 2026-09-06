@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:padding="12dp" android:orientation="vertical">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/widget_preview_date" android:textSize="13sp" android:textStyle="bold" android:textColor="#202124" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp"
+        android:text="@string/widget_preview_table_week" android:textSize="11sp" android:textStyle="bold" android:textColor="#202124" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:background="@drawable/widget_course_background" android:backgroundTint="#82B4DC" android:padding="10dp" android:gravity="center_vertical">
+        <TextView android:layout_width="52dp" android:layout_height="wrap_content" android:text="08:00\n09:50" android:textSize="12sp" android:textColor="#FFFFFF" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_preview_math" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFFFFF" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/widget_preview_room" android:textSize="11sp" android:textColor="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

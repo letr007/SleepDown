@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <ImageView android:id="@+id/widget_background" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:src="@drawable/widget_background" android:scaleType="fitXY" />
+    <ImageView android:id="@+id/widget_background_image" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="@drawable/widget_background" android:scaleType="centerCrop" android:clipToOutline="true" android:visibility="gone" />
+    <RelativeLayout android:id="@+id/widget_content" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="12dp">
+        <include layout="@layout/widget_header_classic" />
+        <ListView android:id="@+id/widget_course_list" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_below="@id/widget_header" android:layout_marginTop="8dp"
+            android:divider="@null" android:scrollbars="none" />
+        <TextView android:id="@+id/widget_empty" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_below="@id/widget_header" android:gravity="center" android:padding="16dp" android:textSize="13sp" />
+    </RelativeLayout>
+</FrameLayout>

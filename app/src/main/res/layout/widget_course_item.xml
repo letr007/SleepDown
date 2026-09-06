@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_course_item"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+    <ImageView
+        android:id="@+id/widget_course_indicator"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:src="@drawable/widget_course_indicator" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/widget_course_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:includeFontPadding="false"
+            android:textColor="#FF202124"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+        <LinearLayout
+            android:id="@+id/widget_course_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_course_location"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:includeFontPadding="false"
+                android:textColor="#FF737373"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/widget_course_teacher"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:includeFontPadding="false"
+                android:textColor="#FF737373"
+                android:textSize="12sp" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/widget_course_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textColor="#FF737373"
+            android:textSize="12sp" />
+    </LinearLayout>
+</LinearLayout>
