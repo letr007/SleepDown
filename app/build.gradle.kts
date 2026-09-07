@@ -9,11 +9,24 @@ plugins {
 }
 
 val releaseSigningPropertiesFile = rootProject.file("release-signing/keystore.properties")
+val releaseSigningEnvironment = mapOf(
+    "storeFile" to "SLEEPDOWN_KEYSTORE_FILE",
+    "storePassword" to "SLEEPDOWN_KEYSTORE_PASSWORD",
+    "keyAlias" to "SLEEPDOWN_KEY_ALIAS",
+    "keyPassword" to "SLEEPDOWN_KEY_PASSWORD",
+).mapValues { (_, variable) -> providers.environmentVariable(variable).orNull }
+val useEnvironmentSigning = releaseSigningEnvironment.values.any { it != null }
 val releaseSigningProperties = Properties().apply {
-    if (releaseSigningPropertiesFile.isFile) {
+    if (useEnvironmentSigning) {
+        require(releaseSigningEnvironment.values.all { !it.isNullOrBlank() }) {
+            "Release signing requires all four SLEEPDOWN_KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD environment variables"
+        }
+        releaseSigningEnvironment.forEach { (key, value) -> setProperty(key, requireNotNull(value)) }
+    } else if (releaseSigningPropertiesFile.isFile) {
         releaseSigningPropertiesFile.inputStream().use { load(it) }
     }
 }
+val hasReleaseSigning = useEnvironmentSigning || releaseSigningPropertiesFile.isFile
 
 android {
     namespace = "com.letr.sleepdown"
@@ -29,7 +42,7 @@ android {
     }
 
     signingConfigs {
-        if (releaseSigningPropertiesFile.isFile) {
+        if (hasReleaseSigning) {
             create("release") {
                 storeFile = rootProject.file(releaseSigningProperties.getProperty("storeFile"))
                 storePassword = releaseSigningProperties.getProperty("storePassword")
@@ -42,7 +55,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            if (releaseSigningPropertiesFile.isFile) {
+            if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

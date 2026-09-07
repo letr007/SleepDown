@@ -3,6 +3,10 @@
 .kotlin/
 **/build/
 
+# Python automation cache
+__pycache__/
+*.pyc
+
 # Local machine configuration
 local.properties
 

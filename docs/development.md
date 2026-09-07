@@ -1,6 +1,6 @@
 # 开发文档
 
-[返回 README](../README.md)
+[返回 README](../README.md) · [CI 与自动发版](ci-release.md)
 
 ## 构建环境
 
