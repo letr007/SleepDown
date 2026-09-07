@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_settings_summary">Theme, language and empty timetable illustration</string>
+    <string name="csv_template_title">CSV template</string>
+    <string name="csv_template_download">Download template</string>
+    <string name="csv_template_saved">Template saved</string>
+    <string name="reminder_saving">Saving…</string>
+    <string name="reminder_settings_saved_title">Reminder settings saved</string>
+    <string name="reminder_saved_disabled">Start and end reminders are off.</string>
+    <string name="reminder_saved_enable_notifications">Notifications are disabled. Enable them under System status to receive reminders.</string>
+    <string name="reminder_saved_no_upcoming">No upcoming classes need reminders.</string>
+    <string name="reminder_saved_schedule_failed">Could not schedule reminders. Try saving again.</string>
+</resources>

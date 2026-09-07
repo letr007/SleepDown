@@ -3,8 +3,8 @@
     android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
     <ImageView android:layout_width="4dp" android:layout_height="66dp" android:src="@drawable/widget_course_indicator" android:tint="#397EA8" />
     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp" android:orientation="vertical">
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_preview_math" android:textSize="15sp" android:textStyle="bold" android:textColor="#202124" android:maxLines="2" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/widget_preview_room" android:textSize="13sp" android:textColor="#707073" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_preview_math" android:textSize="17sp" android:textStyle="bold" android:textColor="#202124" android:maxLines="2" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:ellipsize="end" android:maxLines="1" android:text="@string/widget_preview_room_teacher" android:textSize="13sp" android:textColor="#707073" />
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="08:00–09:50" android:textSize="12sp" android:textColor="#707073" />
     </LinearLayout>
 </LinearLayout>

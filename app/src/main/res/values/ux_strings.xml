@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="display_settings_summary">主题、语言与空课表插图</string>
+    <string name="csv_template_title">CSV 模板</string>
+    <string name="csv_template_download">下载模板</string>
+    <string name="csv_template_saved">模板已保存</string>
+    <string name="reminder_saving">保存中…</string>
+    <string name="reminder_settings_saved_title">提醒设置已保存</string>
+    <string name="reminder_saved_disabled">上课和下课提醒均已关闭。</string>
+    <string name="reminder_saved_enable_notifications">通知权限未开启，请在系统状态中开启通知后使用提醒。</string>
+    <string name="reminder_saved_no_upcoming">暂无需要提醒的后续课程。</string>
+    <string name="reminder_saved_schedule_failed">提醒安排失败，请重试保存。</string>
+</resources>

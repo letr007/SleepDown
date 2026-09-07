@@ -1,7 +1,6 @@
 package com.letr.sleepdown.ui
 
 import android.Manifest
-import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
@@ -147,6 +146,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -211,6 +212,7 @@ private enum class AppScreen {
     TABLE_MANAGE,
     TABLE_SETTINGS,
     APPEARANCE,
+    DISPLAY_SETTINGS,
     COURSE_MANAGE,
     COURSE_EDITOR,
     TIME_TABLE,
@@ -271,15 +273,25 @@ fun TimetableApp(
     val scope = rememberCoroutineScope()
     var externalImportUri by remember { mutableStateOf(initialImportUri) }
     val tables by repository.observeTables().collectAsStateWithLifecycle(initialValue = emptyList())
-    var currentTableId by remember { mutableStateOf(AppContainer.currentTableId(context)) }
-    var screen by remember { mutableStateOf(AppScreen.WEEK) }
-    var editingTableId by remember { mutableStateOf<Long?>(null) }
+    var currentTableId by rememberSaveable { mutableStateOf(AppContainer.currentTableId(context)) }
+    var screenStack by rememberSaveable { mutableStateOf(arrayListOf(AppScreen.WEEK.name)) }
+    val screen = AppScreen.valueOf(screenStack.last())
+    val screenState = rememberSaveableStateHolder()
+    fun navigate(destination: AppScreen) {
+        if (screen != destination) screenStack = ArrayList(screenStack + destination.name)
+    }
+    fun goBack() {
+        if (screenStack.size > 1) screenStack = ArrayList(screenStack.dropLast(1))
+    }
+    fun goHome() {
+        screenStack = arrayListOf(AppScreen.WEEK.name)
+    }
+    var editingTableId by rememberSaveable { mutableStateOf<Long?>(null) }
     var tableDraft by remember { mutableStateOf<TableEntity?>(null) }
-    var editingCourseId by remember { mutableStateOf<Long?>(null) }
-    var editorDay by remember { mutableIntStateOf(1) }
-    var editorStartNode by remember { mutableIntStateOf(1) }
-    var editorStep by remember { mutableIntStateOf(2) }
-    var editorReturnScreen by remember { mutableStateOf(AppScreen.WEEK) }
+    var editingCourseId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editorDay by rememberSaveable { mutableIntStateOf(1) }
+    var editorStartNode by rememberSaveable { mutableIntStateOf(1) }
+    var editorStep by rememberSaveable { mutableIntStateOf(2) }
     var exportDialog by remember { mutableStateOf(false) }
     var exportNotice by remember { mutableStateOf<String?>(null) }
 
@@ -296,7 +308,7 @@ fun TimetableApp(
             currentTableId = id
             AppContainer.setCurrentTableId(context, id)
             tableDraft = null
-            screen = AppScreen.WEEK
+            goHome()
         }
         onTableRequestConsumed()
     }
@@ -346,7 +358,7 @@ fun TimetableApp(
     LaunchedEffect(initialImportUri) {
         if (initialImportUri != null) {
             externalImportUri = initialImportUri
-            screen = AppScreen.IMPORT
+            navigate(AppScreen.IMPORT)
         }
     }
     LaunchedEffect(tables, tableMeta) {
@@ -357,32 +369,22 @@ fun TimetableApp(
     }
 
     BackHandler(enabled = screen != AppScreen.WEEK && screen != AppScreen.COURSE_EDITOR) {
-        screen = when (screen) {
-            AppScreen.TABLE_MANAGE -> AppScreen.WEEK
-            AppScreen.TABLE_SETTINGS,
-            AppScreen.APPEARANCE,
-            AppScreen.COURSE_MANAGE,
-            AppScreen.COURSE_EDITOR,
-            AppScreen.TIME_TABLE,
-            AppScreen.IMPORT,
-            AppScreen.REMINDERS,
-            AppScreen.WIDGET_HELP -> AppScreen.WEEK
-            AppScreen.WEEK -> AppScreen.WEEK
-        }
+        if (screen == AppScreen.TABLE_MANAGE) tableDraft = null
+        goBack()
     }
 
     fun selectTable(id: Long) {
+        if (tableDraft?.id != id) tableDraft = null
         currentTableId = id
         AppContainer.setCurrentTableId(context, id)
     }
 
     fun openAddCourse(day: Int = 1, startNode: Int = 1, step: Int = 2) {
-        editorReturnScreen = screen
         editingCourseId = null
         editorDay = day
         editorStartNode = startNode
         editorStep = step
-        screen = AppScreen.COURSE_EDITOR
+        navigate(AppScreen.COURSE_EDITOR)
     }
 
     fun saveTable(tableToSave: TableEntity) {
@@ -394,16 +396,17 @@ fun TimetableApp(
             }
             selectTable(id)
             showToast(context, context.getString(R.string.save_success))
-            screen = AppScreen.WEEK
+            goBack()
         }
     }
 
     val updateTable: (TableEntity) -> Unit = { updated ->
         tableDraft = updated
-        scope.launch { repository.saveTable(updated) }
+        if (updated.id > 0L) scope.launch { repository.saveTable(updated) }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        screenState.SaveableStateProvider(screen.name) {
         when (screen) {
             AppScreen.WEEK -> {
                 if (tableMeta == null || table == null) {
@@ -417,22 +420,21 @@ fun TimetableApp(
                             currentTableId = tableId,
                             onSelectTable = ::selectTable,
                             onAddCourse = ::openAddCourse,
-                            onOpenManage = { screen = AppScreen.TABLE_MANAGE },
-                            onOpenSettings = { tableDraft = null; editingTableId = tableId; screen = AppScreen.TABLE_SETTINGS },
-                            onOpenAppearance = { editingTableId = tableId; tableDraft = null; screen = AppScreen.APPEARANCE },
-                            onOpenCourseManage = { screen = AppScreen.COURSE_MANAGE },
-                            onOpenTimeTable = { screen = AppScreen.TIME_TABLE },
-                            onOpenImport = { screen = AppScreen.IMPORT },
-                            onOpenWidgetHelp = { screen = AppScreen.WIDGET_HELP },
+                            onOpenManage = { navigate(AppScreen.TABLE_MANAGE) },
+                            onOpenSettings = { tableDraft = null; editingTableId = tableId; navigate(AppScreen.TABLE_SETTINGS) },
+                            onOpenAppearance = { editingTableId = tableId; tableDraft = null; navigate(AppScreen.APPEARANCE) },
+                            onOpenCourseManage = { navigate(AppScreen.COURSE_MANAGE) },
+                            onOpenTimeTable = { navigate(AppScreen.TIME_TABLE) },
+                            onOpenImport = { navigate(AppScreen.IMPORT) },
+                            onOpenWidgetHelp = { navigate(AppScreen.WIDGET_HELP) },
                             onShare = { exportDialog = true },
                             courses = tableMeta!!.courses,
                             onEditCourse = { course ->
-                                editorReturnScreen = AppScreen.WEEK
                                 editingCourseId = course.id
                                 editorDay = 1
                                 editorStartNode = 1
                                 editorStep = 1
-                                screen = AppScreen.COURSE_EDITOR
+                                navigate(AppScreen.COURSE_EDITOR)
                             },
                         )
                     }
@@ -442,11 +444,11 @@ fun TimetableApp(
                 repository = repository,
                 tables = tables,
                 currentTableId = tableId,
-                onBack = { tableDraft = null; screen = AppScreen.WEEK },
-                onSelect = { tableDraft = null; selectTable(it); screen = AppScreen.WEEK },
-                onEditSettings = { tableDraft = null; editingTableId = it; screen = AppScreen.TABLE_SETTINGS },
-                onAppearance = { tableDraft = null; editingTableId = it; selectTable(it); screen = AppScreen.APPEARANCE },
-                onCourses = { tableDraft = null; selectTable(it); screen = AppScreen.COURSE_MANAGE },
+                onBack = { tableDraft = null; goBack() },
+                onSelect = { tableDraft = null; selectTable(it); goHome() },
+                onEditSettings = { tableDraft = null; editingTableId = it; navigate(AppScreen.TABLE_SETTINGS) },
+                onAppearance = { tableDraft = null; editingTableId = it; selectTable(it); navigate(AppScreen.APPEARANCE) },
+                onCourses = { tableDraft = null; selectTable(it); navigate(AppScreen.COURSE_MANAGE) },
                 onCopy = { source ->
                     scope.launch {
                         selectTable(repository.copyTable(source.id, context.getString(R.string.copy_name, source.name)))
@@ -465,22 +467,23 @@ fun TimetableApp(
                         showToast(context, context.getString(R.string.delete_success))
                     }
                 },
-                onNew = { tableDraft = null; editingTableId = null; screen = AppScreen.TABLE_SETTINGS },
+                onNew = { tableDraft = null; editingTableId = null; navigate(AppScreen.TABLE_SETTINGS) },
             )
             AppScreen.TABLE_SETTINGS -> {
                 val editingTable = editingTableId?.let { id -> tables.firstOrNull { it.id == id } }
-                val settingsTable = tableDraft ?: editingTable
+                val settingsTable = tableDraft?.takeIf { it.id == (editingTableId ?: 0L) } ?: editingTable
                 TableSettingsScreen(
                     table = settingsTable,
-                    onBack = { screen = AppScreen.WEEK },
+                    onBack = ::goBack,
                     onSave = ::saveTable,
                     onUpdate = updateTable,
                     currentWeek = settingsTable?.let { currentWeek(it) } ?: 1,
-                    onAppearance = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.APPEARANCE } },
-                    onCourses = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.COURSE_MANAGE } },
-                    onTimeTable = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.TIME_TABLE } },
-                    onReminders = { if (editingTable != null) { selectTable(editingTable.id); screen = AppScreen.REMINDERS } },
-                    onWidgetHelp = { screen = AppScreen.WIDGET_HELP },
+                    onAppearance = { if (editingTable != null) { selectTable(editingTable.id); navigate(AppScreen.APPEARANCE) } },
+                    onCourses = { if (editingTable != null) { selectTable(editingTable.id); navigate(AppScreen.COURSE_MANAGE) } },
+                    onTimeTable = { if (editingTable != null) { selectTable(editingTable.id); navigate(AppScreen.TIME_TABLE) } },
+                    onReminders = { if (editingTable != null) { selectTable(editingTable.id); navigate(AppScreen.REMINDERS) } },
+                    onWidgetHelp = { navigate(AppScreen.WIDGET_HELP) },
+                    onDisplaySettings = { navigate(AppScreen.DISPLAY_SETTINGS) },
                 )
             }
             AppScreen.APPEARANCE -> {
@@ -488,9 +491,9 @@ fun TimetableApp(
                     LoadingView()
                 } else {
                     AppearanceScreen(
-                        table = tableDraft ?: table,
-                        meta = tableMeta!!,
-                        onBack = { screen = AppScreen.WEEK },
+                        repository = repository,
+                        table = tableDraft?.takeIf { it.id == tableId } ?: table,
+                        onBack = ::goBack,
                         onSave = updateTable,
                     )
                 }
@@ -500,17 +503,16 @@ fun TimetableApp(
                     LoadingView()
                 } else {
                     CourseManagementScreen(
-                        table = tableDraft ?: table,
+                        table = tableDraft?.takeIf { it.id == tableId } ?: table,
                         courses = tableMeta!!.courses,
-                        onBack = { screen = AppScreen.WEEK },
+                        onBack = ::goBack,
                         onAdd = { openAddCourse() },
                         onEdit = { course ->
-                            editorReturnScreen = AppScreen.COURSE_MANAGE
                             editingCourseId = course.id
                             editorDay = 1
                             editorStartNode = 1
                             editorStep = 1
-                            screen = AppScreen.COURSE_EDITOR
+                            navigate(AppScreen.COURSE_EDITOR)
                         },
                         onDelete = { course ->
                             scope.launch {
@@ -530,16 +532,16 @@ fun TimetableApp(
             AppScreen.COURSE_EDITOR -> {
                 if (table == null) LoadingView() else CourseEditorScreen(
                     repository = repository,
-                    table = tableDraft ?: table,
+                    table = tableDraft?.takeIf { it.id == tableId } ?: table,
                     courseId = editingCourseId,
                     initialDay = editorDay,
                     initialStartNode = editorStartNode,
                     initialStep = editorStep,
                     existingCourses = tableMeta?.courses.orEmpty(),
                     nodeTimes = tableMeta?.nodeTimes.orEmpty(),
-                    onBack = { screen = editorReturnScreen },
+                    onBack = { goBack() },
                     onSaved = {
-                        if (initialTableId != null) openRequestedTable() else screen = editorReturnScreen
+                        if (initialTableId != null) openRequestedTable() else goBack()
                     },
                     requestedTableId = initialTableId,
                     onOpenRequestedTable = ::openRequestedTable,
@@ -549,8 +551,8 @@ fun TimetableApp(
             AppScreen.TIME_TABLE -> {
                 if (table == null) LoadingView() else AggregateTimeSettingsScreen(
                     repository = repository,
-                    table = tableDraft ?: table,
-                    onBack = { tableDraft = null; screen = AppScreen.WEEK },
+                    table = tableDraft?.takeIf { it.id == tableId } ?: table,
+                    onBack = { tableDraft = null; goBack() },
                     onTableUpdated = { updated -> tableDraft = updated },
                 )
             }
@@ -559,15 +561,17 @@ fun TimetableApp(
                 currentTableId = tableId,
                 initialUri = externalImportUri,
                 onInitialUriConsumed = { externalImportUri = null },
-                onBack = { screen = AppScreen.WEEK },
-                onImported = { id -> selectTable(id); screen = AppScreen.WEEK },
+                onBack = ::goBack,
+                onImported = { id -> selectTable(id); goHome() },
             )
             AppScreen.REMINDERS -> ReminderSettingsScreen(
                 repository = repository,
                 tableId = tableId,
-                onBack = { screen = AppScreen.WEEK },
+                onBack = ::goBack,
             )
-            AppScreen.WIDGET_HELP -> WidgetHelpScreen(onBack = { screen = AppScreen.WEEK })
+            AppScreen.WIDGET_HELP -> WidgetHelpScreen(onBack = ::goBack)
+            AppScreen.DISPLAY_SETTINGS -> DisplaySettingsScreen(onBack = ::goBack)
+        }
         }
     }
     if (exportDialog) {
@@ -1641,6 +1645,7 @@ private fun TableSettingsScreen(
     onTimeTable: () -> Unit,
     onReminders: () -> Unit,
     onWidgetHelp: () -> Unit,
+    onDisplaySettings: () -> Unit,
 ) {
     val defaultTableName = stringResource(R.string.default_table_name)
     val defaultTable = remember(defaultTableName) {
@@ -1648,28 +1653,17 @@ private fun TableSettingsScreen(
     }
     var working by remember(table) { mutableStateOf(table ?: defaultTable) }
     val context = LocalContext.current
-    val uiSettings by rememberSleepDownUiSettings(context)
-    val emptyImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            SleepDownUiPreferences.setEmptyImageUri(context, uri.toString())
-            SleepDownUiPreferences.setShowEmptyImage(context, true)
-        }
-    }
     var nameDialog by remember { mutableStateOf(false) }
     var numberDialog by remember { mutableStateOf<String?>(null) }
     var dateDialog by remember { mutableStateOf(false) }
     var currentWeekDateDialog by remember { mutableStateOf(false) }
-    var languageDialog by remember { mutableStateOf(false) }
-    val languageTag = AppCompatDelegate.getApplicationLocales().toLanguageTags()
-    val languageSummary = when {
-        languageTag.startsWith("en") -> stringResource(R.string.language_english)
-        languageTag.startsWith("zh") -> stringResource(R.string.language_chinese)
-        else -> stringResource(R.string.language_follow_system)
-    }
 
     fun persistWorking() {
-        if (table != null && working.name.isNotBlank()) onUpdate(working)
+        if (working.name.isNotBlank()) onUpdate(working)
+    }
+    BackHandler {
+        persistWorking()
+        onBack()
     }
 
     ScreenScaffold(
@@ -1712,89 +1706,24 @@ private fun TableSettingsScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.term_weeks), stringResource(R.string.term_weeks_summary, working.maxWeek), tint = Color(0xFF4E7BD9), onClick = { numberDialog = "maxWeek" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.sunday_first), trailing = { Switch(checked = working.sundayFirst, onCheckedChange = { working = working.copy(sundayFirst = it) }) }, onClick = { working = working.copy(sundayFirst = !working.sundayFirst) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.List, stringResource(R.string.manage_courses), stringResource(R.string.manage_courses_summary), tint = Color(0xFF4E7BD9), onClick = { persistWorking(); onCourses() })
                 }
             }
             item {
                 SettingsGroup(stringResource(R.string.table_appearance)) {
-                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_saturday), trailing = { Switch(checked = working.showSat, onCheckedChange = { working = working.copy(showSat = it, showWeekend = it || working.showSun) }) }, onClick = { working = working.copy(showSat = !working.showSat, showWeekend = !working.showSat || working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_sunday), trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Visibility, stringResource(R.string.show_other_week_courses), trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Tune, stringResource(R.string.more_appearance), stringResource(R.string.appearance_summary), tint = Color(0xFF8D62C8), onClick = { persistWorking(); onAppearance() })
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.table_appearance), stringResource(R.string.appearance_summary), tint = Color(0xFF8D62C8), onClick = { persistWorking(); onAppearance() })
                 }
             }
             item {
                 SettingsGroup(stringResource(R.string.app_display)) {
-                    Text(stringResource(R.string.theme), modifier = Modifier.padding(start = 16.dp, top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            SleepDownThemeMode.SYSTEM to stringResource(R.string.follow_system),
-                            SleepDownThemeMode.LIGHT to stringResource(R.string.light_theme),
-                            SleepDownThemeMode.DARK to stringResource(R.string.dark_theme),
-                        ).forEach { (mode, label) ->
-                            WeekTypeButton(label, uiSettings.themeMode == mode, {
-                                persistWorking()
-                                SleepDownUiPreferences.setTheme(context, mode)
-                                (context as? Activity)?.recreate()
-                            }, Modifier.weight(1f))
-                        }
-                    }
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Language, stringResource(R.string.language), languageSummary, onClick = { languageDialog = true })
-                    SettingRow(Icons.Default.Home, stringResource(R.string.empty_table_image), if (uiSettings.emptyImageUri.isBlank()) stringResource(R.string.default_original_image) else stringResource(R.string.selected_user_image), trailing = { Switch(checked = uiSettings.showEmptyImage, onCheckedChange = { SleepDownUiPreferences.setShowEmptyImage(context, it) }) })
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { emptyImagePicker.launch(arrayOf("image/*")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.choose_image)) }
-                        OutlinedButton(onClick = { SleepDownUiPreferences.setEmptyImageUri(context, "") }, enabled = uiSettings.emptyImageUri.isNotBlank(), modifier = Modifier.weight(1f)) { Text(stringResource(R.string.use_default_image)) }
-                    }
-                    Text(stringResource(R.string.bottom_spacing), modifier = Modifier.padding(start = 16.dp, top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(0 to stringResource(R.string.none), 48 to stringResource(R.string.standard), 96 to stringResource(R.string.roomy)).forEach { (value, label) ->
-                            WeekTypeButton(label, uiSettings.bottomSpacingDp == value, { SleepDownUiPreferences.setBottomSpacing(context, value) }, Modifier.weight(1f))
-                        }
-                    }
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.app_display), stringResource(R.string.display_settings_summary), onClick = { persistWorking(); onDisplaySettings() })
                 }
             }
             item {
                 SettingsGroup(stringResource(R.string.default_config)) {
                     SettingRow(Icons.Default.Notifications, stringResource(R.string.course_reminders), stringResource(R.string.reminder_summary), tint = Color(0xFF8D62C8), onClick = { persistWorking(); onReminders() })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Widgets, stringResource(R.string.widgets), stringResource(R.string.widget_summary), tint = Color(0xFF4E7BD9), onClick = onWidgetHelp)
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Refresh, stringResource(R.string.reset_default_appearance), stringResource(R.string.reset_appearance_summary), tint = Color(0xFFFF8A00), onClick = {
-                        working = working.copy(
-                            bgImageUri = null,
-                            showWeekend = true,
-                            showSat = true,
-                            showSun = true,
-                            sundayFirst = false,
-                            textColor = 0xFF000000,
-                            itemTextSize = 12f,
-                            itemAlpha = 0.5f,
-                            itemHeightDp = 64,
-                            showTime = false,
-                            showLocation = true,
-                            showRoomPrefix = true,
-                            showTeacher = true,
-                            showOtherWeekCourse = true,
-                            otherWeekAlpha = 0.5f,
-                            showGrid = false,
-                            showTimeBar = true,
-                            headerTextSize = 11,
-                            courseTextColor = 0xFFFFFFFF.toInt(),
-                            strokeColor = 0x80FFFFFF.toInt(),
-                            useDottedLine = false,
-                            itemCenterHorizontal = false,
-                            itemCenterVertical = false,
-                            textColorCompose = false,
-                            strokeColorCompose = false,
-                            radius = 4,
-                        )
-                    })
+                    SettingRow(Icons.Default.Widgets, stringResource(R.string.widgets), stringResource(R.string.widget_summary), tint = Color(0xFF4E7BD9), onClick = { persistWorking(); onWidgetHelp() })
                 }
             }
         }
@@ -1848,6 +1777,65 @@ private fun TableSettingsScreen(
             onDismiss = { currentWeekDateDialog = false },
         )
     }
+}
+
+@Composable
+private fun DisplaySettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val uiSettings by rememberSleepDownUiSettings(context)
+    var languageDialog by remember { mutableStateOf(false) }
+    val languageTag = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    val languageSummary = when {
+        languageTag.startsWith("en") -> stringResource(R.string.language_english)
+        languageTag.startsWith("zh") -> stringResource(R.string.language_chinese)
+        else -> stringResource(R.string.language_follow_system)
+    }
+    val emptyImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                .onSuccess {
+                    SleepDownUiPreferences.setEmptyImageUri(context, uri.toString())
+                    SleepDownUiPreferences.setShowEmptyImage(context, true)
+                }
+                .onFailure { showToast(context, context.getString(R.string.operation_failed)) }
+        }
+    }
+    ScreenScaffold(title = stringResource(R.string.app_display), onBack = onBack) { padding ->
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            item {
+                SettingsGroup(stringResource(R.string.theme)) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            SleepDownThemeMode.SYSTEM to stringResource(R.string.follow_system),
+                            SleepDownThemeMode.LIGHT to stringResource(R.string.light_theme),
+                            SleepDownThemeMode.DARK to stringResource(R.string.dark_theme),
+                        ).forEach { (mode, label) ->
+                            WeekTypeButton(label, uiSettings.themeMode == mode, { SleepDownUiPreferences.setTheme(context, mode) }, Modifier.weight(1f))
+                        }
+                    }
+                    SettingRow(Icons.Default.Language, stringResource(R.string.language), languageSummary, onClick = { languageDialog = true })
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.empty_table_image)) {
+                    SettingRow(Icons.Default.Home, stringResource(R.string.empty_table_image), if (uiSettings.emptyImageUri.isBlank()) stringResource(R.string.default_original_image) else stringResource(R.string.selected_user_image), trailing = { Switch(checked = uiSettings.showEmptyImage, onCheckedChange = { SleepDownUiPreferences.setShowEmptyImage(context, it) }) })
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { emptyImagePicker.launch(arrayOf("image/*")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.choose_image)) }
+                        OutlinedButton(onClick = { SleepDownUiPreferences.setEmptyImageUri(context, "") }, enabled = uiSettings.emptyImageUri.isNotBlank(), modifier = Modifier.weight(1f)) { Text(stringResource(R.string.use_default_image)) }
+                    }
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.bottom_spacing)) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(0 to stringResource(R.string.none), 48 to stringResource(R.string.standard), 96 to stringResource(R.string.roomy)).forEach { (value, label) ->
+                            WeekTypeButton(label, uiSettings.bottomSpacingDp == value, { SleepDownUiPreferences.setBottomSpacing(context, value) }, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (languageDialog) {
         LanguagePickerDialog(
             selectedTag = languageTag,
@@ -1898,8 +1886,8 @@ private fun LanguagePickerDialog(
 
 @Composable
 private fun AppearanceScreen(
+    repository: TimetableRepository,
     table: TableEntity,
-    meta: TableWithMeta,
     onBack: () -> Unit,
     onSave: (TableEntity) -> Unit,
 ) {
@@ -1916,6 +1904,10 @@ private fun AppearanceScreen(
         }
     }
 
+    BackHandler {
+        onSave(working)
+        onBack()
+    }
     ScreenScaffold(
         title = stringResource(R.string.table_appearance),
         onBack = {
@@ -1930,10 +1922,9 @@ private fun AppearanceScreen(
             }) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save)) }
         },
     ) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            item {
-                AppearancePreview(table = working, meta = meta)
-            }
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AggregateAppearancePreview(repository = repository, table = working)
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
                 SettingsGroup(stringResource(R.string.overall)) {
                     SettingRow(
@@ -1962,6 +1953,8 @@ private fun AppearanceScreen(
                     SettingRow(Icons.Default.Visibility, stringResource(R.string.show_sunday), trailing = { Switch(checked = working.showSun, onCheckedChange = { working = working.copy(showSun = it, showWeekend = working.showSat || it) }) }, onClick = { working = working.copy(showSun = !working.showSun, showWeekend = working.showSat || !working.showSun) })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.Visibility, stringResource(R.string.show_other_week_courses), trailing = { Switch(checked = working.showOtherWeekCourse, onCheckedChange = { working = working.copy(showOtherWeekCourse = it) }) }, onClick = { working = working.copy(showOtherWeekCourse = !working.showOtherWeekCourse) })
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow(Icons.Default.CalendarMonth, stringResource(R.string.sunday_first), trailing = { Switch(checked = working.sundayFirst, onCheckedChange = { working = working.copy(sundayFirst = it) }) }, onClick = { working = working.copy(sundayFirst = !working.sundayFirst) })
                 }
             }
             item {
@@ -1998,6 +1991,24 @@ private fun AppearanceScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.Person, stringResource(R.string.show_teacher), trailing = { Switch(checked = working.showTeacher, onCheckedChange = { working = working.copy(showTeacher = it) }) }, onClick = { working = working.copy(showTeacher = !working.showTeacher) })
                 }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.reset_default_appearance)) {
+                    SettingRow(Icons.Default.Refresh, stringResource(R.string.reset_default_appearance), stringResource(R.string.reset_appearance_summary), onClick = {
+                        working = working.copy(
+                            bgImageUri = null, showWeekend = true, showSat = true, showSun = true,
+                            sundayFirst = false, textColor = 0xFF000000, itemTextSize = 12f,
+                            itemAlpha = 0.5f, itemHeightDp = 64, showTime = false, showLocation = true,
+                            showRoomPrefix = true, showTeacher = true, showOtherWeekCourse = true,
+                            otherWeekAlpha = 0.5f, showGrid = false, showTimeBar = true,
+                            headerTextSize = 11, courseTextColor = 0xFFFFFFFF.toInt(),
+                            strokeColor = 0x80FFFFFF.toInt(), useDottedLine = false,
+                            itemCenterHorizontal = false, itemCenterVertical = false,
+                            textColorCompose = false, strokeColorCompose = false, radius = 4,
+                        )
+                    })
+                }
+            }
             }
         }
     }
@@ -2056,31 +2067,6 @@ private fun AppearanceScreen(
             },
             onDismiss = { inputTarget = null },
         )
-    }
-}
-
-@Composable
-private fun AppearancePreview(table: TableEntity, meta: TableWithMeta) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
-        Box(modifier = Modifier.fillMaxWidth().height(230.dp)) {
-            ScheduleBackground(table)
-            Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                Text(stringResource(R.string.preview), color = Color(table.textColor.toInt()), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    (1..5).forEach { day ->
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) { Text("${weekdayName(day)}\n${day + 1}", color = Color(table.textColor.toInt()).copy(alpha = 0.7f), fontSize = 10.sp) }
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    repeat(5) { index ->
-                        val color = CourseColors.asColor(CourseColors.all()[index % CourseColors.all().size])
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = (index * 8).dp).background(color.copy(alpha = table.itemAlpha), RoundedCornerShape(table.radius.dp)).border(1.dp, Color(table.strokeColor), RoundedCornerShape(table.radius.dp)), contentAlignment = Alignment.Center) {
-                            Text(meta.courses.getOrNull(index)?.name ?: stringResource(R.string.course_name), color = Color(table.courseTextColor), fontSize = table.itemTextSize.coerceIn(8f, 20f).sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -2915,6 +2901,9 @@ private fun ReminderSettingsScreen(
     var startLead by remember(tableId) { mutableStateOf("10") }
     var endLead by remember(tableId) { mutableStateOf("0") }
     var message by remember { mutableStateOf<String?>(null) }
+    var saving by remember(tableId) { mutableStateOf(false) }
+    var loaded by remember(tableId) { mutableStateOf(false) }
+    var resultTitle by remember { mutableIntStateOf(R.string.course_reminders) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -2941,10 +2930,13 @@ private fun ReminderSettingsScreen(
             startLead = settings.startLeadMinutes.toString()
             endLead = settings.endLeadMinutes.toString()
             status = scheduler.permissionStatus()
+            loaded = true
         }
     }
 
     fun save() {
+        if (saving || !loaded) return
+        resultTitle = R.string.course_reminders
         val startMinutes = startLead.toIntOrNull()
         val endMinutes = endLead.toIntOrNull()
         if (startMinutes == null || startMinutes < 0 || endMinutes == null || endMinutes < 0) {
@@ -2952,26 +2944,43 @@ private fun ReminderSettingsScreen(
             return
         }
         val updated = settings.copy(startLeadMinutes = startMinutes, endLeadMinutes = endMinutes)
+        saving = true
         scope.launch {
-            runCatching {
+            var persisted = false
+            try {
                 repository.saveReminderSettings(tableId, updated)
-                scheduler.rebuildCurrentTable()
-            }.onSuccess { report ->
-                settings = updated
+                persisted = true
+                val report = scheduler.rebuildCurrentTable()
                 status = report.permissionStatus
+                resultTitle = R.string.reminder_settings_saved_title
                 message = when {
+                    !updated.startEnabled && !updated.endEnabled -> context.getString(R.string.reminder_saved_disabled)
+                    !report.permissionStatus.notificationPermissionGranted || !report.permissionStatus.notificationsEnabled -> context.getString(R.string.reminder_saved_enable_notifications)
                     report.blockedReason != null -> context.getString(R.string.reminder_saved_unavailable)
                     report.usedInexactFallback -> context.getString(R.string.reminder_rebuilt_inexact)
+                    report.scheduledPlanIds.isEmpty() -> context.getString(R.string.reminder_saved_no_upcoming)
                     else -> context.getString(R.string.reminder_rebuilt_count, report.scheduledPlanIds.size)
                 }
-            }.onFailure { message = localizedUiError(context, it, R.string.reminder_save_failed) }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                resultTitle = if (persisted) R.string.reminder_settings_saved_title else R.string.reminder_save_failed
+                message = if (persisted) context.getString(R.string.reminder_saved_schedule_failed)
+                    else localizedUiError(context, error, R.string.reminder_save_failed)
+            } finally {
+                saving = false
+            }
         }
     }
 
     ScreenScaffold(
         title = stringResource(R.string.course_reminders),
         onBack = onBack,
-        actions = { TextButton(onClick = ::save) { Text(stringResource(R.string.save)) } },
+        actions = {
+            TextButton(onClick = ::save, enabled = loaded && !saving) {
+                Text(stringResource(if (saving) R.string.reminder_saving else R.string.save))
+            }
+        },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -3042,8 +3051,15 @@ private fun ReminderSettingsScreen(
                     SettingRow(Icons.Default.Notifications, stringResource(R.string.silent), trailing = { Switch(checked = settings.silent, onCheckedChange = { settings = settings.copy(silent = it) }) })
                 }
             }
-            message?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp) } }
         }
+    }
+    message?.let { text ->
+        AlertDialog(
+            onDismissRequest = { message = null },
+            title = { Text(stringResource(resultTitle)) },
+            text = { Text(text) },
+            confirmButton = { TextButton(onClick = { message = null }) { Text(stringResource(R.string.got_it)) } },
+        )
     }
 }
 
@@ -3058,16 +3074,27 @@ private fun ImportScreen(
 ) {
     val context = LocalContext.current
     val adapter = remember(repository, context) { ImportExportAdapter(context, repository) }
-    var format by remember { mutableStateOf(ImportFormat.CSV) }
-    var target by remember { mutableStateOf(ImportTarget.CREATE_NEW) }
+    var format by rememberSaveable { mutableStateOf(ImportFormat.CSV) }
+    var target by rememberSaveable { mutableStateOf(ImportTarget.CREATE_NEW) }
     val defaultImportTableName = stringResource(R.string.import_default_table_name)
-    var tableName by remember(defaultImportTableName) { mutableStateOf(defaultImportTableName) }
-    var startDate by remember { mutableStateOf(LocalDate.now().with(java.time.DayOfWeek.MONDAY).toString()) }
+    var tableName by rememberSaveable { mutableStateOf(defaultImportTableName) }
+    var startDate by rememberSaveable { mutableStateOf(LocalDate.now().with(java.time.DayOfWeek.MONDAY).toString()) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var sharedFileUri by remember { mutableStateOf<Uri?>(null) }
     var notice by remember { mutableStateOf<ImportNotice?>(null) }
     var loading by remember { mutableStateOf(false) }
     var confirmReplace by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val templateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { adapter.exportCsvTemplate(uri) }
+                .onSuccess { notice = ImportNotice(context.getString(R.string.csv_template_title), context.getString(R.string.csv_template_saved)) {} }
+                .onFailure { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    notice = ImportNotice(context.getString(R.string.export_failed), localizedUiError(context, error, R.string.export_failed)) {}
+                }
+        }
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { pendingUri = it }
 
     LaunchedEffect(initialUri) {
@@ -3168,7 +3195,9 @@ private fun ImportScreen(
             if (format == ImportFormat.CSV) {
                 item {
                     SettingsGroup(stringResource(R.string.csv_file)) {
-                        Text(stringResource(R.string.csv_column_order), modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        OutlinedButton(onClick = { templateLauncher.launch("SleepDown-template.csv") }, enabled = !loading, modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Text(stringResource(R.string.csv_template_download))
+                        }
                         OutlinedTextField(value = tableName, onValueChange = { tableName = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text(stringResource(R.string.table_name)) }, singleLine = true)
                         OutlinedTextField(value = startDate, onValueChange = { startDate = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), label = { Text(stringResource(R.string.first_monday)) }, singleLine = true)
                         Spacer(Modifier.height(8.dp))

@@ -1,20 +1,29 @@
 package com.letr.sleepdown.ui
 
+import android.app.Activity
 import android.content.Context
 import androidx.annotation.StringRes
+import androidx.compose.animation.core.Transition
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowInsetsControllerCompat
 
 enum class SleepDownThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -77,6 +86,61 @@ fun rememberSleepDownUiSettings(context: Context = LocalContext.current): State<
     return state
 }
 
+private const val COLOR_SCHEME_ANIMATION_MILLIS = 300
+
+@Composable
+private fun Transition<ColorScheme>.animateSchemeColor(
+    label: String,
+    targetValueByState: (ColorScheme) -> Color,
+): Color = animateColor(
+    transitionSpec = { tween(COLOR_SCHEME_ANIMATION_MILLIS) },
+    label = label,
+    targetValueByState = { targetValueByState(it) },
+).value
+
+@Composable
+private fun animateColorScheme(target: ColorScheme): ColorScheme {
+    val transition = updateTransition(targetState = target, label = "colorScheme")
+    return target.copy(
+        primary = transition.animateSchemeColor("primary") { it.primary },
+        onPrimary = transition.animateSchemeColor("onPrimary") { it.onPrimary },
+        primaryContainer = transition.animateSchemeColor("primaryContainer") { it.primaryContainer },
+        onPrimaryContainer = transition.animateSchemeColor("onPrimaryContainer") { it.onPrimaryContainer },
+        inversePrimary = transition.animateSchemeColor("inversePrimary") { it.inversePrimary },
+        secondary = transition.animateSchemeColor("secondary") { it.secondary },
+        onSecondary = transition.animateSchemeColor("onSecondary") { it.onSecondary },
+        secondaryContainer = transition.animateSchemeColor("secondaryContainer") { it.secondaryContainer },
+        onSecondaryContainer = transition.animateSchemeColor("onSecondaryContainer") { it.onSecondaryContainer },
+        tertiary = transition.animateSchemeColor("tertiary") { it.tertiary },
+        onTertiary = transition.animateSchemeColor("onTertiary") { it.onTertiary },
+        tertiaryContainer = transition.animateSchemeColor("tertiaryContainer") { it.tertiaryContainer },
+        onTertiaryContainer = transition.animateSchemeColor("onTertiaryContainer") { it.onTertiaryContainer },
+        background = transition.animateSchemeColor("background") { it.background },
+        onBackground = transition.animateSchemeColor("onBackground") { it.onBackground },
+        surface = transition.animateSchemeColor("surface") { it.surface },
+        onSurface = transition.animateSchemeColor("onSurface") { it.onSurface },
+        surfaceVariant = transition.animateSchemeColor("surfaceVariant") { it.surfaceVariant },
+        onSurfaceVariant = transition.animateSchemeColor("onSurfaceVariant") { it.onSurfaceVariant },
+        inverseSurface = transition.animateSchemeColor("inverseSurface") { it.inverseSurface },
+        inverseOnSurface = transition.animateSchemeColor("inverseOnSurface") { it.inverseOnSurface },
+        error = transition.animateSchemeColor("error") { it.error },
+        onError = transition.animateSchemeColor("onError") { it.onError },
+        errorContainer = transition.animateSchemeColor("errorContainer") { it.errorContainer },
+        onErrorContainer = transition.animateSchemeColor("onErrorContainer") { it.onErrorContainer },
+        outline = transition.animateSchemeColor("outline") { it.outline },
+        outlineVariant = transition.animateSchemeColor("outlineVariant") { it.outlineVariant },
+        scrim = transition.animateSchemeColor("scrim") { it.scrim },
+        surfaceTint = transition.animateSchemeColor("surfaceTint") { it.surfaceTint },
+        surfaceBright = transition.animateSchemeColor("surfaceBright") { it.surfaceBright },
+        surfaceDim = transition.animateSchemeColor("surfaceDim") { it.surfaceDim },
+        surfaceContainer = transition.animateSchemeColor("surfaceContainer") { it.surfaceContainer },
+        surfaceContainerHigh = transition.animateSchemeColor("surfaceContainerHigh") { it.surfaceContainerHigh },
+        surfaceContainerLow = transition.animateSchemeColor("surfaceContainerLow") { it.surfaceContainerLow },
+        surfaceContainerHighest = transition.animateSchemeColor("surfaceContainerHighest") { it.surfaceContainerHighest },
+        surfaceContainerLowest = transition.animateSchemeColor("surfaceContainerLowest") { it.surfaceContainerLowest },
+    )
+}
+
 @Composable
 fun SleepDownAppTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
@@ -86,7 +150,7 @@ fun SleepDownAppTheme(content: @Composable () -> Unit) {
         SleepDownThemeMode.LIGHT -> false
         SleepDownThemeMode.DARK -> true
     }
-    val colorScheme = if (dark) {
+    val targetColorScheme = remember(dark) { if (dark) {
         darkColorScheme(
             primary = Color(0xFFFF6B85),
             onPrimary = Color.Black,
@@ -104,6 +168,16 @@ fun SleepDownAppTheme(content: @Composable () -> Unit) {
             onSurface = Color(0xFF141414),
             onSurfaceVariant = Color(0xFF626466),
         )
+    }
+    }
+    val colorScheme = animateColorScheme(targetColorScheme)
+    val view = LocalView.current
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        WindowInsetsControllerCompat(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
     }
     CompositionLocalProvider(
         LocalContext provides context,

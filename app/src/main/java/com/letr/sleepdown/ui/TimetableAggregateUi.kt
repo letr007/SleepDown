@@ -42,6 +42,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -101,8 +102,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -112,7 +116,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.onClick as semanticsOnClick
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
@@ -128,10 +135,12 @@ import com.letr.sleepdown.data.TableEntity
 import com.letr.sleepdown.data.TimetableRepository
 import com.letr.sleepdown.domain.ConflictGroup
 import com.letr.sleepdown.domain.ConflictPreference
+import com.letr.sleepdown.domain.Course
 import com.letr.sleepdown.domain.CourseOccurrence
 import com.letr.sleepdown.domain.EpochDayRange
 import com.letr.sleepdown.domain.GridPlacement
 import com.letr.sleepdown.domain.MinuteOfDay
+import com.letr.sleepdown.domain.LogicalCourseSlot
 import com.letr.sleepdown.domain.MinuteRange
 import com.letr.sleepdown.domain.ScheduleTimeTable
 import com.letr.sleepdown.domain.TimeTableNode
@@ -509,6 +518,102 @@ internal fun AggregateScheduleScreen(
     }
 }
 
+/**
+ * Selects one representative from every non-current recurring period. Current
+ * recurring occurrences are intentionally part of the occupied set: a cancelled
+ * current lesson must not be silently filled by a lesson from another week.
+ */
+internal fun aggregateOtherWeekOccurrences(timetable: Timetable, week: Int): List<CourseOccurrence> {
+    if (week !in 1..timetable.maxWeek || timetable.courses.isEmpty()) return emptyList()
+    val currentRange = aggregateWeekRange(timetable, week)
+    val current = TimetableEngine.expandOccurrences(timetable, currentRange)
+    val recurring = TimetableEngine.recurringOccurrences(timetable)
+    val occupied = (recurring.filter { it.week == week } + current).toMutableList()
+    val representatives = mutableListOf<CourseOccurrence>()
+    recurring.asSequence()
+        .filter { it.week != week }
+        .sortedWith(compareBy<CourseOccurrence> { abs(it.week - week) }.thenBy { it.week }.thenBy { it.id })
+        .forEach { candidate ->
+            val overlaps = occupied.any { existing ->
+                existing.dayOfWeek == candidate.dayOfWeek &&
+                    (if (existing.usesCustomTime || candidate.usesCustomTime) {
+                        existing.startMinuteOfDay < candidate.endMinuteOfDay && candidate.startMinuteOfDay < existing.endMinuteOfDay
+                    } else {
+                        existing.startNode < candidate.startNode + candidate.nodeCount && candidate.startNode < existing.startNode + existing.nodeCount
+                    })
+            }
+            if (!overlaps) {
+                representatives += candidate
+                occupied += candidate
+            }
+        }
+    return representatives
+}
+
+@Composable
+internal fun AggregateAppearancePreview(repository: TimetableRepository, table: TableEntity) {
+    var timetable by remember(table.id) { mutableStateOf<Timetable?>(null) }
+    LaunchedEffect(table.id) {
+        timetable = repository.loadDomainTimetableOrNull(table.id)
+    }
+    val loaded = timetable
+    val previewCourseName = stringResource(R.string.appearance_preview_course)
+    val previewTeacher = stringResource(R.string.appearance_preview_teacher)
+    val previewRoom = stringResource(R.string.appearance_preview_room)
+    val previewTimetable = remember(loaded, table.id, previewCourseName, previewTeacher, previewRoom) {
+        val base = loaded ?: Timetable(
+            id = table.id.toString(),
+            name = table.name,
+            firstDayEpochDay = table.startDate,
+            maxWeek = table.maxWeek,
+            timeTable = ScheduleTimeTable(nodes = aggregateDefaultNodes()),
+        )
+        loaded?.takeIf { it.courses.isNotEmpty() } ?: base.copy(
+            timeTable = base.timeTable.takeIf { it.nodes.isNotEmpty() }
+                ?: ScheduleTimeTable(nodes = aggregateDefaultNodes()),
+            courses = listOf(
+                Course(
+                    id = "appearance-preview",
+                    name = previewCourseName,
+                    color = 0xFF4E7BD9.toInt(),
+                    slots = listOf(
+                        LogicalCourseSlot(
+                            id = "appearance-preview-slot",
+                            courseId = "appearance-preview",
+                            dayOfWeek = 1,
+                            startNode = 1,
+                            nodeCount = 2,
+                            teacher = previewTeacher,
+                            room = previewRoom,
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+    val previewWeek = currentWeekFor(table).coerceIn(1, previewTimetable.maxWeek.coerceAtLeast(1))
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(320.dp),
+        shape = RoundedCornerShape(table.radius.coerceIn(0, 32).dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(table.radius.coerceIn(0, 32).dp))) {
+            AggregateScheduleBackground(table)
+            AggregateSchedulePage(
+                table = table,
+                timetable = previewTimetable,
+                week = previewWeek,
+                isActivePage = true,
+                currentWeek = previewWeek,
+                onAddCourse = { _, _, _ -> },
+                onOpenOccurrence = { _, _ -> },
+                onMoveOccurrence = { _, _, _ -> },
+                movingEnabled = false,
+            )
+        }
+    }
+}
+
 @Composable
 private fun AggregateScheduleBackground(table: TableEntity) {
     val value = table.bgImageUri.orEmpty()
@@ -590,10 +695,6 @@ private fun AggregateScheduleToolbar(
                             DropdownMenuItem(text = { Text(stringResource(R.string.backup_export)) }, onClick = { menu = false; onShare() })
                             DropdownMenuItem(text = { Text(stringResource(R.string.table_management)) }, onClick = { menu = false; onManage() })
                             DropdownMenuItem(text = { Text(stringResource(R.string.table_settings)) }, onClick = { menu = false; onSettings() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.table_appearance)) }, onClick = { menu = false; onAppearance() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.course_management)) }, onClick = { menu = false; onCourseManage() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.time_table)) }, onClick = { menu = false; onTimeTable() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.widgets)) }, onClick = { menu = false; onWidgetHelp() })
                         }
                     }
                 },
@@ -616,12 +717,29 @@ private fun AggregateSchedulePage(
 ) {
     val days = aggregateVisibleDays(table)
     val weekRange = aggregateWeekRange(timetable, week)
-    val occurrences = TimetableEngine.expandOccurrences(timetable, weekRange)
-        .filter { it.dayOfWeek in days }
-    val conflicts = TimetableEngine.conflictGroups(occurrences, timetable.conflictPreferences)
-    val conflictByOccurrence = conflicts.flatMap { group -> group.occurrences.map { it.id to group } }.toMap()
-    val placements = TimetableEngine.gridPlacements(occurrences, timetable.timeTable, timetable.conflictPreferences)
-    val nodeCount = max(table.nodeCount, timetable.timeTable.nodes.maxOfOrNull { it.node } ?: 0).coerceIn(1, 60)
+    val currentOccurrences = remember(timetable, weekRange, days) {
+        TimetableEngine.expandOccurrences(timetable, weekRange).filter { it.dayOfWeek in days }
+    }
+    val otherWeekOccurrences = remember(timetable, week, days, table.showOtherWeekCourse) {
+        if (table.showOtherWeekCourse) aggregateOtherWeekOccurrences(timetable, week).filter { it.dayOfWeek in days }
+        else emptyList()
+    }
+    val occurrences = remember(currentOccurrences, otherWeekOccurrences) {
+        (currentOccurrences + otherWeekOccurrences).distinctBy { it.id }
+    }
+    val conflictByOccurrence = remember(currentOccurrences, timetable.conflictPreferences) {
+        TimetableEngine.conflictGroups(currentOccurrences, timetable.conflictPreferences)
+            .flatMap { group -> group.occurrences.map { it.id to group } }.toMap()
+    }
+    val placements = remember(currentOccurrences, timetable.timeTable, timetable.conflictPreferences) {
+        TimetableEngine.gridPlacements(currentOccurrences, timetable.timeTable, timetable.conflictPreferences)
+    }
+    val nodeCount = table.nodeCount.coerceIn(1, 60)
+    val visiblePlacements = remember(occurrences, nodeCount, timetable.timeTable) {
+        occurrences.mapNotNull { occurrence ->
+            visibleCoursePlacement(occurrence, nodeCount, timetable.timeTable)?.let { occurrence.id to it }
+        }.toMap()
+    }
     val rowHeight = (table.itemHeightDp.coerceIn(32, 128) + 2).dp
     val bodyScroll = rememberScrollState()
     val gridHeight = rowHeight * nodeCount.toFloat()
@@ -673,7 +791,7 @@ private fun AggregateSchedulePage(
                         }
                     }
                 }
-                BoxWithConstraints(modifier = Modifier.weight(1f).height(scrollContentHeight).padding(end = 8.dp)) {
+                BoxWithConstraints(modifier = Modifier.weight(1f).height(scrollContentHeight).padding(end = 8.dp).clipToBounds()) {
                     val columnWidth = if (days.isEmpty()) 0.dp else maxWidth / days.size
                     val dayLabels = days.map { stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(it)) }
                     Column(modifier = Modifier.height(gridHeight)) {
@@ -695,15 +813,15 @@ private fun AggregateSchedulePage(
                                 .pointerInput(days, rowIndex) {
                                     detectTapGestures { point ->
                                         val column = (point.x / (size.width.toFloat() / days.size)).toInt().coerceIn(0, days.lastIndex)
-                                        selection = CourseGridSelection(days[column], rowIndex + 1, rowIndex + 1)
+                                        if (movingEnabled) selection = CourseGridSelection(days[column], rowIndex + 1, rowIndex + 1)
                                     }
                                 }
                                 .semantics {
                                     contentDescription = periodLabel
                                     customActions = days.mapIndexed { index, day ->
                                         CustomAccessibilityAction(dayLabels[index]) {
-                                            selection = CourseGridSelection(day, rowIndex + 1, rowIndex + 1)
-                                            true
+                                            if (movingEnabled) selection = CourseGridSelection(day, rowIndex + 1, rowIndex + 1)
+                                            movingEnabled
                                         }
                                     }
                                 })
@@ -713,21 +831,18 @@ private fun AggregateSchedulePage(
                         val dayColumn = days.indexOf(occurrence.dayOfWeek)
                         if (dayColumn >= 0) {
                             val overlapPlacement = placements[occurrence.id]
-                            val nodePlacement = fallbackPlacement(occurrence, nodeCount)
-                            val placement = if (occurrence.usesCustomTime) {
-                                overlapPlacement ?: nodePlacement
-                            } else {
-                                nodePlacement.copy(
-                                    leftFraction = overlapPlacement?.leftFraction ?: 0.0,
-                                    widthFraction = overlapPlacement?.widthFraction ?: 1.0,
-                                    column = overlapPlacement?.column ?: 0,
-                                    columnCount = overlapPlacement?.columnCount ?: 1,
-                                )
-                            }
+                            val nodePlacement = visiblePlacements[occurrence.id] ?: return@forEach
+                            val placement = nodePlacement.copy(
+                                leftFraction = overlapPlacement?.leftFraction ?: 0.0,
+                                widthFraction = overlapPlacement?.widthFraction ?: 1.0,
+                                column = overlapPlacement?.column ?: 0,
+                                columnCount = overlapPlacement?.columnCount ?: 1,
+                            )
                             AggregateOccurrenceCard(
                                 occurrence = occurrence,
                                 conflictGroup = conflictByOccurrence[occurrence.id],
                                 table = table,
+                                isOtherWeek = occurrence.week != week,
                                 columnWidth = columnWidth,
                                 dayColumn = dayColumn,
                                 placement = placement,
@@ -736,7 +851,7 @@ private fun AggregateSchedulePage(
                                 scrollState = bodyScroll,
                                 nodeCount = nodeCount,
                                 visibleDays = days,
-                                movingEnabled = movingEnabled,
+                                movingEnabled = movingEnabled && occurrence.week == week,
                                 onClick = {
                                     selection = null
                                     onOpenOccurrence(occurrence, conflictByOccurrence[occurrence.id])
@@ -788,7 +903,7 @@ private fun AggregateSchedulePage(
                     }
                 }
             }
-            if (occurrences.isEmpty() && selection == null && uiSettings.showEmptyImage) {
+            if (visiblePlacements.isEmpty() && selection == null && uiSettings.showEmptyImage) {
                 if (uiSettings.emptyImageUri.isNotBlank()) {
                     AsyncImage(
                         model = uiSettings.emptyImageUri,
@@ -814,6 +929,7 @@ private fun AggregateOccurrenceCard(
     occurrence: CourseOccurrence,
     conflictGroup: ConflictGroup?,
     table: TableEntity,
+    isOtherWeek: Boolean = false,
     columnWidth: Dp,
     dayColumn: Int,
     placement: GridPlacement,
@@ -829,7 +945,7 @@ private fun AggregateOccurrenceCard(
     val density = LocalDensity.current
     val widthFraction = placement.widthFraction.toFloat().coerceIn(0.05f, 1f)
     val cardWidth = (columnWidth * widthFraction - 3.dp).coerceAtLeast(18.dp)
-    val cardHeight = (gridHeight * placement.heightFraction.toFloat() - 3.dp).coerceAtLeast(28.dp)
+    val cardHeight = (gridHeight * placement.heightFraction.toFloat() - 3.dp).coerceAtLeast(1.dp)
     val x = columnWidth * (dayColumn + placement.leftFraction.toFloat()) + 1.dp
     val y = gridHeight * placement.topFraction.toFloat() + 1.dp
     val rowHeightPx = with(density) { rowHeight.toPx() }
@@ -841,9 +957,27 @@ private fun AggregateOccurrenceCard(
     var dragStartScroll by remember(occurrence.id) { mutableFloatStateOf(0f) }
     var dragChanged by remember(occurrence.id) { mutableStateOf(false) }
     val base = CourseColors.asColor(if (occurrence.color == 0) CourseColors.colorFor(occurrence.courseName) else occurrence.color)
-    val textColor = Color(table.courseTextColor)
+    val configuredTextColor = Color(table.courseTextColor)
+    val textColor = if (table.textColorCompose) aggregateBlend(configuredTextColor, base) else configuredTextColor
     val conflict = conflictGroup?.hasConflict == true
-    val stroke = if (conflict) SleepDownUiAccent else Color(table.strokeColor)
+    val configuredStroke = if (table.strokeColorCompose) aggregateBlend(Color(table.strokeColor), base) else Color(table.strokeColor)
+    val stroke = if (conflict) SleepDownUiAccent else configuredStroke
+    val titleSize = if (placement.columnCount > 1) 10f else table.itemTextSize.coerceIn(8f, 24f)
+    val titleStyle = TextStyle(
+        color = textColor,
+        fontSize = titleSize.sp,
+        lineHeight = (titleSize * 1.08f).sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = if (table.itemCenterHorizontal) TextAlign.Center else TextAlign.Start,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    val detailStyle = TextStyle(
+        color = textColor,
+        fontSize = 10.sp,
+        lineHeight = 11.sp,
+        textAlign = if (table.itemCenterHorizontal) TextAlign.Center else TextAlign.Start,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
     val clock = "${MinuteOfDay.format(occurrence.startMinuteOfDay)}-${MinuteOfDay.format(occurrence.endMinuteOfDay)}"
     val currentOnClick by rememberUpdatedState(onClick)
     val currentOnMove by rememberUpdatedState(onMove)
@@ -945,27 +1079,45 @@ private fun AggregateOccurrenceCard(
             )
             .width(cardWidth)
             .height(cardHeight)
-            .alpha(if (occurrence.isRescheduled) 0.96f else 1f)
+            .alpha((if (occurrence.isRescheduled) 0.96f else 1f) * if (isOtherWeek) table.otherWeekAlpha.coerceIn(0f, 1f) else 1f)
             .background(base.copy(alpha = table.itemAlpha.coerceIn(0f, 1f)), RoundedCornerShape(table.radius.coerceIn(0, 32).dp))
-            .border(if (conflict) 2.dp else 1.dp, stroke, RoundedCornerShape(table.radius.coerceIn(0, 32).dp))
-            .padding(4.dp),
+            .then(
+                if (table.useDottedLine) {
+                    Modifier.drawBehind {
+                        val width = (if (conflict) 2.dp else 1.dp).toPx()
+                        drawRoundRect(
+                            color = stroke,
+                            cornerRadius = CornerRadius(table.radius.coerceIn(0, 32).dp.toPx()),
+                            style = Stroke(width = width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+                        )
+                    }
+                } else {
+                    Modifier.border(if (conflict) 2.dp else 1.dp, stroke, RoundedCornerShape(table.radius.coerceIn(0, 32).dp))
+                },
+            )
+            .padding(horizontal = 4.dp, vertical = 3.dp),
     ) {
         val compactConflict = placement.columnCount > 1
-        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Top) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = if (table.itemCenterHorizontal) Alignment.CenterHorizontally else Alignment.Start,
+            verticalArrangement = if (table.itemCenterVertical) Arrangement.Center else Arrangement.Top,
+        ) {
+            if (isOtherWeek) Text(stringResource(R.string.other_week_label), style = detailStyle, maxLines = 1)
             Text(
                 occurrence.courseName,
-                color = textColor,
-                fontSize = if (compactConflict) 10.sp else table.itemTextSize.coerceIn(8f, 24f).sp,
-                fontWeight = FontWeight.Bold,
+                style = titleStyle,
                 maxLines = if (compactConflict) 2 else 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (!compactConflict && table.showTime) Text(clock, color = textColor, fontSize = 10.sp, maxLines = 1)
-            if (!compactConflict && table.showTeacher && occurrence.teacher.isNotBlank()) Text(occurrence.teacher, color = textColor, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!compactConflict && table.showLocation && occurrence.room.isNotBlank()) Text(occurrence.room, color = textColor, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (occurrence.isRescheduled) Text(stringResource(R.string.rescheduled), color = textColor, fontSize = 9.sp)
+            if (!compactConflict && table.showTime) Text(clock, style = detailStyle, maxLines = 1)
+            if (!compactConflict && table.showTeacher && occurrence.teacher.isNotBlank()) Text(occurrence.teacher, style = detailStyle, maxLines = if (cardHeight >= 100.dp) 2 else 1, overflow = TextOverflow.Ellipsis)
+            if (!compactConflict && table.showLocation && occurrence.room.isNotBlank()) {
+                Text(if (table.showRoomPrefix) "@${occurrence.room}" else occurrence.room, style = detailStyle, maxLines = if (cardHeight >= 100.dp) 3 else 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (occurrence.isRescheduled) Text(stringResource(R.string.rescheduled), style = detailStyle)
             if (conflictGroup?.hasConflict == true) {
-                Text(stringResource(R.string.conflict_count, conflictGroup.occurrences.size), color = SleepDownUiAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(stringResource(R.string.conflict_count, conflictGroup.occurrences.size), style = detailStyle.copy(color = SleepDownUiAccent, fontWeight = FontWeight.Bold), maxLines = 1)
             }
         }
     }
@@ -1482,26 +1634,43 @@ internal fun AggregateTimeSettingsScreen(
     var message by remember(table.id) { mutableStateOf<String?>(null) }
     var nameDialog by remember { mutableStateOf<AggregateNameDialogState?>(null) }
     var deleteTarget by remember { mutableStateOf<ReusableTimeTableEntity?>(null) }
+    var editorMode by remember(table.id) { mutableStateOf(false) }
+    var advancedExpanded by remember(table.id) { mutableStateOf(false) }
+    var backConfirmation by remember { mutableStateOf(false) }
+    var savedName by remember(table.id) { mutableStateOf("") }
+    var savedNodes by remember(table.id) { mutableStateOf<List<TimeTableNode>>(emptyList()) }
     val defaultTimeTableId = reusableTables
         .sortedWith(compareBy<ReusableTimeTableEntity> { it.sortOrder }.thenBy { it.id })
         .firstOrNull()
         ?.id
 
     suspend fun loadTimeTable(id: Long) {
-        val entity = reusableTables.firstOrNull { it.id == id } ?: return
+        // Read by id instead of the Flow snapshot: a freshly-created timetable
+        // may not have appeared in reusableTables before navigation.
+        val entity = repository.getTimeTableEntity(id) ?: return
         val nodes = repository.getTimeTableNodes(id)
         editingId = id
         selectedName = entity.name
         rows.clear()
         rows.addAll(nodes.sortedBy { it.node }.map { AggregateNodeDraft(it.node, formatMinuteForUi(it.startMinuteOfDay), formatMinuteForUi(it.endMinuteOfDay)) })
         loadedId = id
+        savedName = selectedName
+        savedNodes = rows.map { TimeTableNode.fromStrings(it.node, it.start, it.end) }
         nodeError = emptyList()
     }
 
-    LaunchedEffect(table.id, reusableTables.map { it.id }) {
-        val target = reusableTables.firstOrNull { it.id == table.timeTableId } ?: reusableTables.firstOrNull()
-        if (target != null && loadedId != target.id) loadTimeTable(target.id)
+    LaunchedEffect(table.id, reusableTables.firstOrNull()?.id) {
+        val targetId = table.timeTableId.takeIf { it > 0L } ?: reusableTables.firstOrNull()?.id
+        if (targetId != null && loadedId == 0L) loadTimeTable(targetId)
     }
+
+    fun requestBack() {
+        val changed = selectedName != savedName || rows.map { TimeTableNode.fromStrings(it.node, it.start, it.end) } != savedNodes
+        if (editorMode && changed) backConfirmation = true
+        else if (editorMode) editorMode = false
+        else onBack()
+    }
+    BackHandler(enabled = true, onBack = ::requestBack)
 
     fun validateCurrent(): ScheduleTimeTable? {
         val candidate = ScheduleTimeTable(
@@ -1517,7 +1686,9 @@ internal fun AggregateTimeSettingsScreen(
         val candidate = validateCurrent() ?: return
         scope.launch {
             runCatching {
-                repository.saveTimeTableNodes(editingId, candidate.nodes)
+                repository.saveTimeTable(candidate)
+                savedName = candidate.name
+                savedNodes = candidate.nodes
                 repository.getTable(table.id)?.let(onTableUpdated)
             }.onSuccess { aggregateToast(context, R.string.time_table_saved) }
                 .onFailure { message = localizedUiError(context, it, R.string.time_table_save_failed) }
@@ -1536,22 +1707,26 @@ internal fun AggregateTimeSettingsScreen(
     }
 
     AggregateScreenScaffold(
-        title = stringResource(R.string.time_table),
-        onBack = onBack,
+        title = if (editorMode) selectedName.ifBlank { stringResource(R.string.edit_time_table) } else stringResource(R.string.time_table),
+        onBack = ::requestBack,
         actions = {
-            IconButton(onClick = { nameDialog = AggregateNameDialogState("new", "") }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_time_table)) }
-            IconButton(onClick = ::saveCurrent) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_time_table)) }
+            if (!editorMode) {
+                IconButton(onClick = { nameDialog = AggregateNameDialogState("new", "") }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_time_table)) }
+            } else {
+                IconButton(onClick = ::saveCurrent) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_time_table)) }
+            }
         },
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Text(stringResource(R.string.time_table_shared_hint), modifier = Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
             }
-            item {
-                Text(stringResource(R.string.reusable_time_tables), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
-            items(reusableTables, key = { it.id }) { item ->
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = if (item.id == editingId) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+            if (!editorMode) {
+                item {
+                    Text(stringResource(R.string.reusable_time_tables), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+                items(reusableTables, key = { it.id }) { item ->
+                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = if (item.id == table.timeTableId) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f).clickable { selectCurrent(item.id) }) {
@@ -1566,17 +1741,25 @@ internal fun AggregateTimeSettingsScreen(
                                     fontSize = 12.sp,
                                 )
                             }
-                            if (item.id == editingId) Icon(Icons.Default.Check, contentDescription = stringResource(R.string.editing), tint = SleepDownUiAccent)
+                            if (item.id == table.timeTableId) Icon(Icons.Default.Check, contentDescription = stringResource(R.string.current_time_table_in_use), tint = SleepDownUiAccent)
                         }
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { scope.launch { loadTimeTable(item.id) } }) { Icon(Icons.Default.Edit, contentDescription = null); Spacer(Modifier.width(3.dp)); Text(stringResource(R.string.edit)) }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    loadTimeTable(item.id)
+                                    editorMode = true
+                                    advancedExpanded = false
+                                }
+                            }) { Icon(Icons.Default.Edit, contentDescription = null); Spacer(Modifier.width(3.dp)); Text(stringResource(R.string.edit)) }
                             TextButton(onClick = { nameDialog = AggregateNameDialogState("copy:${item.id}", context.getString(R.string.copy_name, item.name)) }) { Icon(Icons.Default.ContentCopy, contentDescription = null); Spacer(Modifier.width(3.dp)); Text(stringResource(R.string.copy_time_table)) }
                             TextButton(onClick = { if (item.id != defaultTimeTableId) deleteTarget = item }, enabled = item.id != defaultTimeTableId) { Icon(Icons.Default.Delete, contentDescription = null); Spacer(Modifier.width(3.dp)); Text(stringResource(R.string.delete)) }
                         }
                     }
                 }
+                }
             }
-            item {
+            if (editorMode) {
+                item {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { nameDialog = AggregateNameDialogState("rename", selectedName) }, enabled = editingId > 0L, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.rename)) }
                     OutlinedButton(onClick = {
@@ -1586,6 +1769,13 @@ internal fun AggregateTimeSettingsScreen(
                 }
             }
             item {
+                Row(modifier = Modifier.fillMaxWidth().clickable { advancedExpanded = !advancedExpanded }.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.time_table_advanced_settings), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(if (advancedExpanded) stringResource(R.string.collapse) else stringResource(R.string.expand), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                }
+            }
+            if (advancedExpanded) {
+                item {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1665,6 +1855,7 @@ internal fun AggregateTimeSettingsScreen(
                         }
                     }
                 }
+                }
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
@@ -1688,8 +1879,8 @@ internal fun AggregateTimeSettingsScreen(
                     }
                 }
             }
-            items(rows.indices.toList(), key = { index -> "node-${rows[index].node}" }) { index ->
-                val row = rows[index]
+                items(rows.indices.toList(), key = { index -> "node-${rows[index].node}" }) { index ->
+                    val row = rows[index]
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${row.node}", modifier = Modifier.width(28.dp), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
@@ -1706,6 +1897,7 @@ internal fun AggregateTimeSettingsScreen(
                     }
                     val issues = nodeError.filter { it.node == row.node || it.otherNode == row.node }
                     issues.forEach { issue -> Text(aggregateIssueMessage(context, issue), color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(start = 48.dp, end = 12.dp, bottom = 4.dp)) }
+                }
                 }
             }
             message?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp)) } }
@@ -1736,10 +1928,10 @@ internal fun AggregateTimeSettingsScreen(
                                 }
                                 val id = repository.saveTimeTable(candidate)
                                 loadTimeTable(id)
+                                editorMode = true
+                                advancedExpanded = false
                             }
                             dialog.mode == "rename" -> {
-                                val candidate = validateCurrent() ?: throw IllegalArgumentException(context.getString(R.string.fix_time_table_error))
-                                repository.saveTimeTable(candidate.copy(name = cleanName))
                                 selectedName = cleanName
                             }
                             else -> {
@@ -1754,12 +1946,33 @@ internal fun AggregateTimeSettingsScreen(
                                 }
                                 val id = repository.saveTimeTable(candidate)
                                 loadTimeTable(id)
+                                editorMode = true
+                                advancedExpanded = false
                             }
                         }
                     }.onFailure { message = localizedUiError(context, it, R.string.operation_failed) }
                 }
             },
             onDismiss = { nameDialog = null },
+        )
+    }
+    if (backConfirmation) {
+        AlertDialog(
+            onDismissRequest = { backConfirmation = false },
+            title = { Text(stringResource(R.string.unsaved_time_table_changes)) },
+            text = { Text(stringResource(R.string.unsaved_time_table_changes_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    backConfirmation = false
+                    selectedName = savedName
+                    rows.clear()
+                    rows.addAll(savedNodes.map { AggregateNodeDraft(it.node, formatMinuteForUi(it.startMinuteOfDay), formatMinuteForUi(it.endMinuteOfDay)) })
+                    nodeError = emptyList()
+                    message = null
+                    editorMode = false
+                }) { Text(stringResource(R.string.discard_changes)) }
+            },
+            dismissButton = { TextButton(onClick = { backConfirmation = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
     deleteTarget?.let { target ->
@@ -2057,14 +2270,6 @@ internal fun aggregateMoveCommand(
     }
 }
 
-private fun fallbackPlacement(occurrence: CourseOccurrence, nodeCount: Int): GridPlacement {
-    val safeCount = nodeCount.coerceAtLeast(1)
-    return GridPlacement(
-        topFraction = ((occurrence.startNode - 1).toDouble() / safeCount).coerceIn(0.0, 1.0),
-        heightFraction = (occurrence.nodeCount.toDouble() / safeCount).coerceIn(0.02, 1.0),
-    )
-}
-
 private fun formatMinuteForUi(value: Int): String =
     value.takeIf { it in 0..(24 * 60) }?.let { minute -> MinuteOfDay.format(minute) }.orEmpty()
 
@@ -2101,6 +2306,13 @@ private fun aggregateIssueMessage(context: Context, issue: TimeTableValidationIs
         else -> context.getString(R.string.time_table_validation_error)
     }
 }
+
+private fun aggregateBlend(first: Color, second: Color): Color = Color(
+    red = ((first.red + second.red) / 2f).coerceIn(0f, 1f),
+    green = ((first.green + second.green) / 2f).coerceIn(0f, 1f),
+    blue = ((first.blue + second.blue) / 2f).coerceIn(0f, 1f),
+    alpha = first.alpha,
+)
 
 private fun aggregateParseColor(value: String, fallback: Color): Color {
     val raw = value.removePrefix("#")

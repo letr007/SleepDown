@@ -38,6 +38,7 @@ class ScheduleWidgetTest {
                 R.layout.widget_today_next,
                 R.layout.widget_week,
                 R.layout.widget_course_item,
+                R.layout.widget_course_wide_item,
                 R.layout.widget_course_classic_item,
                 R.layout.widget_week_grid_item,
                 R.layout.widget_today_modern,
@@ -388,6 +389,45 @@ class ScheduleWidgetTest {
                 assertEquals("Sunday", days.single { it.date.toEpochDay() == monday + 6 }.courses.single().courseName)
             }
         }
+    }
+
+    @Test
+    fun wideModernCourseLayoutJoinsAndEllipsizesCourseDetails() {
+        instrumentation.runOnMainSync {
+            val root = RemoteViews(context.packageName, R.layout.widget_course_wide_item)
+                .apply(context, FrameLayout(context))
+            val details = root.findViewById<android.widget.LinearLayout>(R.id.widget_course_detail)
+            val location = root.findViewById<android.widget.TextView>(R.id.widget_course_location)
+            val teacher = root.findViewById<android.view.View>(R.id.widget_course_teacher)
+            assertEquals(android.widget.LinearLayout.HORIZONTAL, details.orientation)
+            assertEquals(0, root.findViewById<android.view.View>(R.id.widget_course_name).visibility)
+            assertEquals(android.view.View.VISIBLE, location.visibility)
+            assertEquals(android.text.TextUtils.TruncateAt.END, location.ellipsize)
+            assertEquals(1, location.maxLines)
+            assertEquals(android.view.View.GONE, teacher.visibility)
+        }
+    }
+
+    @Test
+    fun dailyCourseLayoutsUseTheAvailableWidthAndPreserveReadableDetails() {
+        assertFalse(usesJoinedCourseDetails(WidgetKind.NEXT, 279))
+        assertTrue(usesJoinedCourseDetails(WidgetKind.NEXT, 280))
+        assertFalse(usesJoinedCourseDetails(WidgetKind.TODAY, 279))
+        assertTrue(usesJoinedCourseDetails(WidgetKind.TODAY, 280))
+        assertEquals("Room · Teacher", joinCourseDetails(" Room ", "Teacher "))
+        assertEquals("Teacher", joinCourseDetails("", " Teacher "))
+
+        assertFalse(usesWideCourseLayout(WidgetKind.TODAY_MODERN, 279))
+        assertTrue(usesWideCourseLayout(WidgetKind.TODAY_MODERN, 280))
+        assertEquals(130, courseWidthDp(300, WidgetKind.TODAY_AND_NEXT_DAY))
+        assertFalse(usesWideCourseLayout(WidgetKind.TODAY_AND_NEXT_DAY, 300))
+        assertEquals(140, courseWidthDp(320, WidgetKind.TODAY_AND_NEXT_DAY))
+        assertTrue(usesWideCourseLayout(WidgetKind.TODAY_AND_NEXT_DAY, 320))
+
+        assertEquals(1, widgetViewTypeCount(WidgetKind.NEXT))
+        assertEquals(1, widgetViewTypeCount(WidgetKind.TODAY))
+        assertEquals(2, widgetViewTypeCount(WidgetKind.TODAY_MODERN))
+        assertEquals(2, widgetViewTypeCount(WidgetKind.TODAY_AND_NEXT_DAY))
     }
 
     @Test

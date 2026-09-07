@@ -89,6 +89,28 @@ class ImportExportAdapterTest {
     }
 
     @Test
+    fun csvTemplateRoundTripsWithWeeklyOddAndSelectedWeeks() = runBlocking {
+        val file = newFile("template.csv")
+        adapter.exportCsvTemplate(Uri.fromFile(file))
+        assertTrue(file.readText(Charsets.UTF_8).startsWith("\uFEFF课程名称,"))
+        val rows = com.letr.sleepdown.logic.CsvParser.parse(file.readText(), FIRST_DAY).getOrThrow()
+        assertEquals(3, rows.size)
+        assertEquals(listOf(com.letr.sleepdown.logic.CsvParser.WeekSegment(1, 16, 0)), rows[0].weekSegments)
+        assertEquals(listOf(com.letr.sleepdown.logic.CsvParser.WeekSegment(1, 16, 1)), rows[1].weekSegments)
+        assertEquals(listOf(
+            com.letr.sleepdown.logic.CsvParser.WeekSegment(2, 8, 2),
+            com.letr.sleepdown.logic.CsvParser.WeekSegment(10, 10, 0),
+            com.letr.sleepdown.logic.CsvParser.WeekSegment(12, 12, 0),
+        ), rows[2].weekSegments)
+        val result = adapter.importFile(
+            uri = Uri.fromFile(file), format = ImportFormat.CSV, target = ImportTarget.CREATE_NEW,
+            options = ImportOptions(name = "Template courses", firstDayEpochDay = FIRST_DAY),
+        )
+        assertEquals(rows.map { it.name }, result.timetable.courses.map { it.name })
+        assertTrue(result.timetable.courses.all { it.slots.isNotEmpty() })
+    }
+
+    @Test
     fun importsCsvJsonWakeUpAndIcsAsNewTables() = runBlocking {
         val csv = adapter.importFile(
             uri = writeFile(

@@ -248,7 +248,7 @@ object DomainMappers {
             name = timetable.name,
             startDate = timetable.firstDayEpochDay,
             maxWeek = timetable.maxWeek,
-            nodeCount = timetable.timeTable.nodes.size,
+            nodeCount = existingTable?.nodeCount ?: timetable.timeTable.nodes.size,
             showWeekend = timetable.showSaturday || timetable.showSunday,
             showSat = timetable.showSaturday,
             showSun = timetable.showSunday,

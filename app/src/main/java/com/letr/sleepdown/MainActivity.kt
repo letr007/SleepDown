@@ -11,10 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.letr.sleepdown.ui.TimetableApp
-import com.letr.sleepdown.ui.SleepDownThemeMode
-import com.letr.sleepdown.ui.SleepDownUiPreferences
 import com.letr.sleepdown.ui.TimetableTheme
 import com.letr.sleepdown.widget.WIDGET_TABLE_ID_EXTRA
 
@@ -57,18 +54,6 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        val settings = SleepDownUiPreferences.read(this)
-        val systemDark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val dark = when (settings.themeMode) {
-            SleepDownThemeMode.SYSTEM -> systemDark
-            SleepDownThemeMode.LIGHT -> false
-            SleepDownThemeMode.DARK -> true
-        }
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = !dark
-            isAppearanceLightNavigationBars = !dark
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }

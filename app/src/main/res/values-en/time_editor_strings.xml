@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="time_table_advanced_settings">Advanced settings</string>
+    <string name="collapse">Collapse</string>
+    <string name="expand">Expand</string>
+    <string name="unsaved_time_table_changes">Unsaved changes</string>
+    <string name="unsaved_time_table_changes_message">Going back will discard the current time slot and timetable name changes. Continue?</string>
+    <string name="appearance_preview_course">Sample course</string>
+    <string name="appearance_preview_teacher">Sample teacher</string>
+    <string name="appearance_preview_room">Sample room</string>
+    <string name="other_week_label">Other week</string>
+</resources>

@@ -227,6 +227,15 @@ class ImportExportAdapter(
         ),
     )
 
+    /** Writes an editable UTF-8 CSV with examples accepted by the course importer. */
+    suspend fun exportCsvTemplate(uri: Uri) = writeText(
+        uri,
+        "\uFEFF课程名称,星期,开始节数,结束节数,老师,地点,周数\r\n" +
+            "高等数学,1,1,2,张老师,教学楼101,1-16\r\n" +
+            "大学英语,3,3,4,李老师,教学楼203,1-16单\r\n" +
+            "程序设计,5,5,6,王老师,实验楼301,\"2-8双,10,12\"\r\n",
+    )
+
     /** Exports JSON or ICS to a resolver-backed destination. */
     suspend fun exportFile(
         uri: Uri,

@@ -73,6 +73,10 @@ private const val BACKGROUND_PREFIX = "background_"
 private const val COLOR_BLOCK_PREFIX = "color_block_"
 private const val TEXT_SIZE_PREFIX = "text_size_"
 private const val DEFAULT_TEXT_SIZE_SCALE = 1f
+private const val WIDE_COURSE_MIN_WIDTH_DP = 280
+private const val WIDE_DOUBLE_COLUMN_MIN_WIDTH_DP = 140
+private const val WIDGET_HORIZONTAL_PADDING_DP = 24
+private const val DOUBLE_DAY_GAP_DP = 16
 
 private val widgetUpdateMutex = Mutex()
 
@@ -448,6 +452,11 @@ private fun configureTodayWidget(
     )
 }
 
+internal fun remainingTodayCourseItems(data: LoadedWidgetData, date: LocalDate): List<WidgetSnapshotItem> =
+    todaySnapshot(data, date).items.filter { item ->
+        data.isRemainingCourse(item.epochDay, item.endMinuteOfDay)
+    }
+
 private fun configureTodayNextWidget(
     context: Context,
     views: RemoteViews,
@@ -660,7 +669,9 @@ internal class ScheduleWidgetFactory(
             setTextViewText(R.id.widget_loading_text, appContext.getString(R.string.widget_loading))
         }
 
-    override fun getViewTypeCount(): Int = 1
+    override fun getViewTypeCount(): Int = widgetViewTypeCount(
+        sourceIntent.getStringExtra(EXTRA_WIDGET_KIND).toWidgetKind(),
+    )
 
     override fun getItemId(position: Int): Long = position.toLong()
 
@@ -674,8 +685,14 @@ internal class ScheduleWidgetFactory(
     private fun courseViews(entry: WidgetEntry.Course): RemoteViews {
         val item = entry.item
         val classic = kind == WidgetKind.TODAY
+        val widthDp = widgetWidthDp()
+        val wideLayout = usesWideCourseLayout(kind, widthDp)
         val views = RemoteViews(appContext.packageName,
-            if (classic) R.layout.widget_course_classic_item else R.layout.widget_course_item)
+            when {
+                classic -> R.layout.widget_course_classic_item
+                wideLayout -> R.layout.widget_course_wide_item
+                else -> R.layout.widget_course_item
+            })
         views.setOnClickFillInIntent(
             R.id.widget_course_item,
             Intent().putExtra(WIDGET_TABLE_ID_EXTRA, entry.snapshot.timetableId.toLongOrNull() ?: 0L),
@@ -704,19 +721,22 @@ internal class ScheduleWidgetFactory(
         } else timeLabel(appContext, item))
         val room = item.room.trim().takeIf { !classic || style.showLocation }.orEmpty()
         val teacher = item.teacher.trim().takeIf { !classic || style.showTeacher }.orEmpty()
-        views.setTextViewText(R.id.widget_course_location, room)
-        views.setTextViewText(R.id.widget_course_teacher, teacher)
-        views.setViewVisibility(R.id.widget_course_location, if (room.isBlank()) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_course_teacher, if (teacher.isBlank()) View.GONE else View.VISIBLE)
+        val joinDetails = wideLayout || (kind != WidgetKind.TODAY_MODERN &&
+            usesJoinedCourseDetails(kind, widthDp))
+        val locationText = if (joinDetails) joinCourseDetails(room, teacher) else room
+        views.setTextViewText(R.id.widget_course_location, locationText)
+        views.setTextViewText(R.id.widget_course_teacher, if (joinDetails) "" else teacher)
+        views.setViewVisibility(R.id.widget_course_location, if (locationText.isBlank()) View.GONE else View.VISIBLE)
+        views.setViewVisibility(R.id.widget_course_teacher, if (!joinDetails && teacher.isNotBlank()) View.VISIBLE else View.GONE)
         views.setViewVisibility(
             R.id.widget_course_detail,
-            if (room.isBlank() && teacher.isBlank()) View.GONE else View.VISIBLE,
+            if (locationText.isBlank() && (joinDetails || teacher.isBlank())) View.GONE else View.VISIBLE,
         )
         if (classic) {
             listOf(R.id.widget_course_name, R.id.widget_course_location, R.id.widget_course_teacher, R.id.widget_course_time).forEach {
                 views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, style.courseTextSize.toFloat())
             }
-        } else applyCourseTextSize(views, 1f)
+        } else applyCourseTextSize(views, if (kind == WidgetKind.TODAY_MODERN) 1.15f else 1f)
         return views
     }
 
@@ -755,7 +775,40 @@ internal class ScheduleWidgetFactory(
 
     private fun widgetId(): Int =
         sourceIntent.getIntExtra(EXTRA_WIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+
+    private fun widgetWidthDp(): Int =
+        AppWidgetManager.getInstance(appContext).getAppWidgetOptions(widgetId())
+            .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 320)
 }
+
+internal fun widgetViewTypeCount(kind: WidgetKind): Int = when (kind) {
+    WidgetKind.TODAY_MODERN,
+    WidgetKind.TODAY_AND_NEXT_DAY -> 2
+    else -> 1
+}
+
+internal fun courseWidthDp(widgetWidthDp: Int, kind: WidgetKind): Int =
+    if (kind == WidgetKind.TODAY_AND_NEXT_DAY) {
+        ((widgetWidthDp - WIDGET_HORIZONTAL_PADDING_DP - DOUBLE_DAY_GAP_DP) / 2).coerceAtLeast(0)
+    } else {
+        widgetWidthDp.coerceAtLeast(0)
+    }
+
+internal fun usesWideCourseLayout(kind: WidgetKind, widgetWidthDp: Int): Boolean = when (kind) {
+    WidgetKind.TODAY_MODERN,
+    WidgetKind.TODAY_AND_NEXT_DAY -> courseWidthDp(widgetWidthDp, kind) >=
+        if (kind == WidgetKind.TODAY_AND_NEXT_DAY) WIDE_DOUBLE_COLUMN_MIN_WIDTH_DP else WIDE_COURSE_MIN_WIDTH_DP
+    else -> false
+}
+
+internal fun usesJoinedCourseDetails(kind: WidgetKind, widgetWidthDp: Int): Boolean = when (kind) {
+    WidgetKind.NEXT,
+    WidgetKind.TODAY -> courseWidthDp(widgetWidthDp, kind) >= WIDE_COURSE_MIN_WIDTH_DP
+    else -> false
+}
+
+internal fun joinCourseDetails(room: String, teacher: String): String =
+    listOf(room.trim(), teacher.trim()).filter { it.isNotBlank() }.joinToString(" · ")
 
 internal fun buildEntries(
     context: Context,
@@ -768,9 +821,7 @@ internal fun buildEntries(
     WidgetSnapshotKind.TODAY -> {
         val date = LocalDate.ofEpochDay(data.nowEpochDay).plusDays(dayOffset.toLong())
         val snapshot = todaySnapshot(data, date)
-        snapshot.items.filter {
-            data.isRemainingCourse(it.epochDay, it.endMinuteOfDay)
-        }.map { WidgetEntry.Course(it, snapshot) }
+        remainingTodayCourseItems(data, date).map { WidgetEntry.Course(it, snapshot) }
     }
     WidgetSnapshotKind.WEEK -> {
         val snapshot = selectedWeekSnapshot(context, data, appWidgetId)

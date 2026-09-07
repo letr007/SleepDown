@@ -7,7 +7,7 @@
         <include layout="@layout/widget_header_compact" />
         <ListView android:id="@+id/widget_course_list" android:layout_width="match_parent" android:layout_height="match_parent"
             android:layout_below="@id/widget_header" android:layout_marginTop="8dp"
-            android:divider="@null" android:dividerHeight="10dp" android:scrollbars="none" />
+            android:divider="@null" android:dividerHeight="6dp" android:scrollbars="none" />
         <TextView android:id="@+id/widget_empty" android:layout_width="match_parent" android:layout_height="match_parent"
             android:layout_below="@id/widget_header" android:gravity="center" android:padding="12dp" android:textSize="13sp" />
     </RelativeLayout>

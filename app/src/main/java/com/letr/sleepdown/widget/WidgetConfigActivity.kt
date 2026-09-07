@@ -458,8 +458,8 @@ private fun TableOption(table: TableEntity, selected: Boolean, onClick: () -> Un
 private fun widgetConfigTitle(kind: WidgetKind): String = when (kind) {
     WidgetKind.NEXT -> stringResource(R.string.widget_config_next_title)
     WidgetKind.WEEK -> stringResource(R.string.widget_config_week_title)
-    WidgetKind.TODAY,
-    WidgetKind.TODAY_MODERN -> stringResource(R.string.widget_config_today_title)
+    WidgetKind.TODAY -> stringResource(R.string.widget_config_today_title)
+    WidgetKind.TODAY_MODERN -> stringResource(R.string.widget_config_today_modern_title)
     WidgetKind.TODAY_AND_NEXT_DAY -> stringResource(R.string.widget_config_today_next_title)
 }
 
@@ -467,7 +467,7 @@ private fun widgetConfigTitle(kind: WidgetKind): String = when (kind) {
 private fun widgetConfigDescription(kind: WidgetKind): String = when (kind) {
     WidgetKind.NEXT -> stringResource(R.string.widget_config_next_description)
     WidgetKind.WEEK -> stringResource(R.string.widget_config_week_description)
-    WidgetKind.TODAY,
-    WidgetKind.TODAY_MODERN -> stringResource(R.string.widget_config_today_description)
+    WidgetKind.TODAY -> stringResource(R.string.widget_config_today_description)
+    WidgetKind.TODAY_MODERN -> stringResource(R.string.widget_config_today_modern_description)
     WidgetKind.TODAY_AND_NEXT_DAY -> stringResource(R.string.widget_config_today_next_description)
 }

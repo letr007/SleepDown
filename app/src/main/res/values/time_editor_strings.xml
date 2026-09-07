@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="time_table_advanced_settings">高级设置</string>
+    <string name="collapse">收起</string>
+    <string name="expand">展开</string>
+    <string name="unsaved_time_table_changes">未保存的修改</string>
+    <string name="unsaved_time_table_changes_message">返回将放弃当前节次和时间表名称的修改，确定继续吗？</string>
+    <string name="appearance_preview_course">示例课程</string>
+    <string name="appearance_preview_teacher">示例教师</string>
+    <string name="appearance_preview_room">示例教室</string>
+    <string name="other_week_label">非本周</string>
+</resources>
