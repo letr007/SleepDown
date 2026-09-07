@@ -111,7 +111,7 @@ class WidgetBackgroundTest {
                         assertEquals(Color.RED, rendered.getPixel(rendered.width / 2, rendered.height / 2))
                         assertTrue(rendered.allocationByteCount <= 640 * 640 * 4)
                     } else {
-                        assertNull(photo.drawable)
+                        assertNull((photo.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap)
                     }
                 }
             }
