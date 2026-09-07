@@ -23,7 +23,7 @@ SleepDown 支持课程编辑、拖动调课、多课表管理和桌面小组件�
 
 Android 界面使用 Jetpack Compose，iOS 使用 SwiftUI，共享课程模型与计算逻辑使用 Kotlin Multiplatform。
 
-[开发文档](docs/development.md) · [CI 与自动发版](docs/ci-release.md) · [更新日志](CHANGELOG.md)
+[开发文档](docs/development.md) · [更新日志](CHANGELOG.md)
 
 ## 功能
 
