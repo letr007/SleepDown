@@ -1,6 +1,14 @@
 package com.letr.sleepdown.widget
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.content.res.Configuration
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -59,6 +67,35 @@ internal fun loadWidgetBackground(context: Context, uri: Uri): Bitmap {
     if (scale == 1f) return decoded
     return Bitmap.createScaledBitmap(decoded, (decoded.width * scale).roundToInt().coerceAtLeast(1),
         (decoded.height * scale).roundToInt().coerceAtLeast(1), true).also { decoded.recycle() }
+}
+
+/** Rasterize center-crop and corners together: API 26 cannot apply outline clipping through RemoteViews. */
+internal fun loadRoundedWidgetBackground(context: Context, uri: Uri, widgetId: Int): Bitmap {
+    val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(widgetId)
+    val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+    val widthKey = if (portrait) AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH
+    val heightKey = if (portrait) AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
+    val widthDp = (options.getInt(widthKey).takeIf { it > 0 } ?: 320).coerceAtMost(1600)
+    val heightDp = (options.getInt(heightKey).takeIf { it > 0 } ?: 240).coerceAtMost(1600)
+    val scale = minOf(2f, 640f / max(widthDp, heightDp))
+    val width = (widthDp * scale).roundToInt().coerceAtLeast(1)
+    val height = (heightDp * scale).roundToInt().coerceAtLeast(1)
+    val source = loadWidgetBackground(context, uri)
+    try {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val cropScale = max(width.toFloat() / source.width, height.toFloat() / source.height)
+        val matrix = Matrix().apply {
+            setScale(cropScale, cropScale)
+            postTranslate((width - source.width * cropScale) / 2f, (height - source.height * cropScale) / 2f)
+        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            shader = BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(matrix) }
+        }
+        Canvas(bitmap).drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 16f * scale, 16f * scale, paint)
+        return bitmap
+    } finally {
+        source.recycle()
+    }
 }
 
 internal fun stageWidgetBackground(context: Context, uri: Uri, widgetId: Int): String {

@@ -70,6 +70,25 @@ class WidgetBackgroundTest {
     }
 
     @Test
+    fun roundedBackgroundCropsTheImageBeforeApplyingCorners() {
+        val source = Bitmap.createBitmap(1800, 900, Bitmap.Config.ARGB_8888)
+        source.eraseColor(Color.RED)
+        android.graphics.Canvas(source).drawRect(600f, 0f, 1200f, 900f,
+            android.graphics.Paint().apply { color = Color.BLUE })
+        input.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        source.recycle()
+        val rendered = loadRoundedWidgetBackground(context, Uri.fromFile(input), widgetId)
+        try {
+            assertEquals(0, Color.alpha(rendered.getPixel(0, 0)))
+            assertEquals(Color.BLUE, rendered.getPixel(rendered.width * 3 / 10, rendered.height / 2))
+            assertEquals(Color.BLUE, rendered.getPixel(rendered.width / 2, rendered.height / 2))
+            assertTrue(rendered.allocationByteCount <= 640 * 640 * 4)
+        } finally {
+            rendered.recycle()
+        }
+    }
+
+    @Test
     fun photoBackgroundUsesItsOwnImageAndDoesNotApplySolidColorTransparency() {
         val staged = stageWidgetBackground(context, image(Color.RED), widgetId)
         commitWidgetBackground(context, widgetId,
@@ -85,7 +104,15 @@ class WidgetBackgroundTest {
                     assertEquals(if (visible) View.VISIBLE else View.GONE, photo.visibility)
                     assertEquals(View.GONE, root.findViewById<View>(R.id.widget_background).visibility)
                     assertEquals(255, photo.imageAlpha)
-                    assertTrue(photo.clipToOutline)
+                    assertEquals(ImageView.ScaleType.FIT_XY, photo.scaleType)
+                    if (visible) {
+                        val rendered = (photo.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                        assertEquals(0, Color.alpha(rendered.getPixel(0, 0)))
+                        assertEquals(Color.RED, rendered.getPixel(rendered.width / 2, rendered.height / 2))
+                        assertTrue(rendered.allocationByteCount <= 640 * 640 * 4)
+                    } else {
+                        assertNull(photo.drawable)
+                    }
                 }
             }
         }

@@ -2832,8 +2832,8 @@ private struct ScheduleWeekGrid: View {
 
     private var days: [Int64] {
         let start = TimetableDates.range(for: timetable, week: week).startEpochDay
-        let weekdays = [1, 2, 3, 4, 5] + (timetable.showSaturday ? [6] : []) + (timetable.showSunday ? [7] : [])
-        let ordered = timetable.sundayFirst && timetable.showSunday ? [7] + weekdays.filter { $0 != 7 } : weekdays
+        let weekdays: [Int] = [1, 2, 3, 4, 5] + (timetable.showSaturday ? [6] : []) + (timetable.showSunday ? [7] : [])
+        let ordered: [Int] = timetable.sundayFirst && timetable.showSunday ? [7] + weekdays.filter { $0 != 7 } : weekdays
         return ordered.map { start + Int64($0 - 1) }
     }
 

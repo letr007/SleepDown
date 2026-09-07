@@ -977,7 +977,7 @@ internal fun applyWidgetStyle(context: Context, views: RemoteViews, appWidgetId:
     if (!modern) {
         views.setViewVisibility(R.id.widget_background_image, if (imageBackground) View.VISIBLE else View.GONE)
         views.setImageViewBitmap(R.id.widget_background_image,
-            if (imageBackground) loadWidgetBackground(context, Uri.parse(style.backgroundImage)) else null)
+            if (imageBackground) loadRoundedWidgetBackground(context, Uri.parse(style.backgroundImage), appWidgetId) else null)
     }
     views.setViewVisibility(
         R.id.widget_background,
