@@ -3429,7 +3429,7 @@ private fun DatePickerDialogFor(value: Long, onSelected: (LocalDate) -> Unit, on
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickerDialogFor(value: String, onSelected: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun TimePickerDialogFor(value: String, onSelected: (String) -> Unit, onDismiss: () -> Unit) {
     val parsed = parseTime(value)
     val state = rememberTimePickerState(
         initialHour = parsed.hour,

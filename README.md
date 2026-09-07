@@ -7,7 +7,7 @@
 
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0--beta.2-informational?style=flat-square" alt="Version 0.1.0-beta.2"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0--beta.3-informational?style=flat-square" alt="Version 0.1.0-beta.3"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/iOS-15.0%2B-black?style=flat-square" alt="iOS 15.0+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
@@ -73,7 +73,7 @@ Windows 使用 `gradlew.bat`。Release 签名、设备测试与目录结构见[�
 
 ## 当前版本
 
-`0.1.0-beta.2` 为公开测试版。性能与稳定性仍在改进，部分操作存在卡顿或应用无响应风险。
+`0.1.0-beta.3` 为公开测试版。性能与稳定性仍在改进，部分操作存在卡顿或应用无响应风险。
 
 欢迎通过 Issue 反馈问题或提交 Pull Request。反馈时请附上版本、设备型号和复现步骤；分享截图、课表或日志前，请移除个人信息。
 
