@@ -1635,6 +1635,14 @@ internal fun AggregateTimeSettingsScreen(
     var nameDialog by remember { mutableStateOf<AggregateNameDialogState?>(null) }
     var deleteTarget by remember { mutableStateOf<ReusableTimeTableEntity?>(null) }
     var editorMode by remember(table.id) { mutableStateOf(false) }
+    var timePickerTarget by remember(table.id) { mutableStateOf<Pair<Int, Boolean>?>(null) }
+    var saving by remember(table.id) { mutableStateOf(false) }
+    var saveError by remember(table.id) { mutableStateOf<String?>(null) }
+    val managementScroll = rememberLazyListState()
+    val editorScroll = rememberLazyListState()
+    LaunchedEffect(editorMode, editingId) {
+        if (editorMode) editorScroll.scrollToItem(0)
+    }
     var advancedExpanded by remember(table.id) { mutableStateOf(false) }
     var backConfirmation by remember { mutableStateOf(false) }
     var savedName by remember(table.id) { mutableStateOf("") }
@@ -1665,6 +1673,7 @@ internal fun AggregateTimeSettingsScreen(
     }
 
     fun requestBack() {
+        if (saving) return
         val changed = selectedName != savedName || rows.map { TimeTableNode.fromStrings(it.node, it.start, it.end) } != savedNodes
         if (editorMode && changed) backConfirmation = true
         else if (editorMode) editorMode = false
@@ -1683,15 +1692,29 @@ internal fun AggregateTimeSettingsScreen(
     }
 
     fun saveCurrent() {
-        val candidate = validateCurrent() ?: return
+        if (saving) return
+        val candidate = validateCurrent() ?: run {
+            saveError = nodeError.joinToString("\n") { aggregateIssueMessage(context, it) }
+            return
+        }
+        saving = true
         scope.launch {
-            runCatching {
+            try {
                 repository.saveTimeTable(candidate)
                 savedName = candidate.name
                 savedNodes = candidate.nodes
                 repository.getTable(table.id)?.let(onTableUpdated)
-            }.onSuccess { aggregateToast(context, R.string.time_table_saved) }
-                .onFailure { message = localizedUiError(context, it, R.string.time_table_save_failed) }
+                message = null
+                advancedExpanded = false
+                editorMode = false
+                aggregateToast(context, R.string.time_table_saved)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                saveError = localizedUiError(context, error, R.string.time_table_save_failed)
+            } finally {
+                saving = false
+            }
         }
     }
 
@@ -1713,11 +1736,11 @@ internal fun AggregateTimeSettingsScreen(
             if (!editorMode) {
                 IconButton(onClick = { nameDialog = AggregateNameDialogState("new", "") }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_time_table)) }
             } else {
-                IconButton(onClick = ::saveCurrent) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_time_table)) }
+                IconButton(onClick = ::saveCurrent, enabled = !saving) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_time_table)) }
             }
         },
     ) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(state = if (editorMode) editorScroll else managementScroll, modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Text(stringResource(R.string.time_table_shared_hint), modifier = Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
             }
@@ -1884,9 +1907,19 @@ internal fun AggregateTimeSettingsScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                     Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${row.node}", modifier = Modifier.width(28.dp), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
-                        OutlinedTextField(value = row.start, onValueChange = { rows[index] = row.copy(start = it); nodeError = emptyList() }, label = { Text(stringResource(R.string.start)) }, singleLine = true, modifier = Modifier.weight(1f))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.start), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedButton(onClick = { timePickerTarget = index to true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(row.start)
+                            }
+                        }
                         Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(value = row.end, onValueChange = { rows[index] = row.copy(end = it); nodeError = emptyList() }, label = { Text(stringResource(R.string.end)) }, singleLine = true, modifier = Modifier.weight(1f))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.end), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedButton(onClick = { timePickerTarget = index to false }, modifier = Modifier.fillMaxWidth()) {
+                                Text(row.end)
+                            }
+                        }
                         IconButton(onClick = {
                             if (rows.size > 1) {
                                 rows.removeAt(index)
@@ -1902,6 +1935,34 @@ internal fun AggregateTimeSettingsScreen(
             }
             message?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp)) } }
         }
+    }
+
+    timePickerTarget?.let { (index, isStart) ->
+        val row = rows[index]
+        TimePickerDialogFor(
+            value = if (isStart) row.start else row.end,
+            onSelected = { value ->
+                rows[index] = if (isStart) row.copy(start = value) else row.copy(end = value)
+                nodeError = emptyList()
+                timePickerTarget = null
+            },
+            onDismiss = { timePickerTarget = null },
+        )
+    }
+    if (saving) {
+        AlertDialog(
+            onDismissRequest = {},
+            text = { androidx.compose.material3.CircularProgressIndicator() },
+            confirmButton = {},
+        )
+    }
+    saveError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { saveError = null },
+            title = { Text(stringResource(R.string.time_table_save_failed)) },
+            text = { Text(error) },
+            confirmButton = { TextButton(onClick = { saveError = null }) { Text(stringResource(R.string.got_it)) } },
+        )
     }
 
     nameDialog?.let { dialog ->
