@@ -7,7 +7,7 @@
 
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0--beta.1-informational?style=flat-square" alt="Version 0.1.0-beta.1"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0--beta.2-informational?style=flat-square" alt="Version 0.1.0-beta.2"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/iOS-15.0%2B-black?style=flat-square" alt="iOS 15.0+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
@@ -23,7 +23,7 @@ SleepDown 支持课程编辑、拖动调课、多课表管理和桌面小组件�
 
 Android 界面使用 Jetpack Compose，iOS 使用 SwiftUI，共享课程模型与计算逻辑使用 Kotlin Multiplatform。
 
-[开发文档](docs/development.md) · [CI 与自动发版](docs/ci-release.md) · [更新日志](CHANGELOG.md)
+[开发文档](docs/development.md) · [更新日志](CHANGELOG.md)
 
 ## 功能
 
@@ -31,7 +31,7 @@ Android 界面使用 Jetpack Compose，iOS 使用 SwiftUI，共享课程模型�
 - **调课**：拖动后选择「仅本周」或「全部周次」，也可单独取消或调整某次课程。
 - **课表与作息**：管理多张课表，共用时间表，设置统一课时长度和指定节次间的休息时间。
 - **导入与备份**：导入 CSV、SleepDown JSON、`.wakeup_schedule` 和 ICS 文件，导出本地备份。
-- **桌面小组件**：Android 提供今日、紧凑、宽屏、双日与周课表，以及背景与样式设置；iOS 提供临近课程、今日、双日与本周列表。
+- **桌面小组件**：Android 提供今日课程（日历、列表、大字）、双日与周课表，以及背景与样式设置；iOS 提供临近课程、今日、双日与本周列表。
 - **提醒与外观**：本地课程提醒、主题设置和中英文界面。
 
 ## 下载安装
@@ -73,7 +73,7 @@ Windows 使用 `gradlew.bat`。Release 签名、设备测试与目录结构见[�
 
 ## 当前版本
 
-`0.1.0-beta.1` 为公开测试版。性能与稳定性仍在改进，部分操作存在卡顿或应用无响应风险。
+`0.1.0-beta.2` 为公开测试版。性能与稳定性仍在改进，部分操作存在卡顿或应用无响应风险。
 
 欢迎通过 Issue 反馈问题或提交 Pull Request。反馈时请附上版本、设备型号和复现步骤；分享截图、课表或日志前，请移除个人信息。
 
