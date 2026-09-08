@@ -455,6 +455,62 @@ enum IOSCourseEditingError: LocalizedError {
 }
 
 enum IOSGridGeometry {
+    static func otherWeekCourses(timetable: Timetable, week: Int32) -> [CourseOccurrence] {
+        guard week >= 1, week <= timetable.maxWeek else { return [] }
+        let range = TimetableDates.range(for: timetable, week: week)
+        let recurring = TimetableEngine.shared.recurringOccurrences(timetable: timetable)
+        let current = TimetableEngine.shared.expandOccurrences(timetable: timetable, range: range)
+        var occupied = current + recurring.filter { $0.week == week }
+        let candidates = recurring.filter { $0.week != week }.sorted {
+            let left = abs(Int($0.week) - Int(week)), right = abs(Int($1.week) - Int(week))
+            if left != right { return left < right }
+            if $0.week != $1.week { return $0.week < $1.week }
+            return $0.id < $1.id
+        }
+        var result: [CourseOccurrence] = []
+        for item in candidates {
+            let overlaps = occupied.contains { existing in
+                guard existing.dayOfWeek == item.dayOfWeek else { return false }
+                if existing.usesCustomTime || item.usesCustomTime {
+                    return existing.startMinuteOfDay < item.endMinuteOfDay && item.startMinuteOfDay < existing.endMinuteOfDay
+                }
+                return existing.startNode < item.startNode + item.nodeCount && item.startNode < existing.startNode + existing.nodeCount
+            }
+            if !overlaps {
+                result.append(item)
+                occupied.append(item)
+            }
+        }
+        return result
+    }
+
+    /// Visible rows are a presentation preference; clipping never changes the stored lesson.
+    static func visibleSpan(_ item: CourseOccurrence, nodes: [TimeTableNode], visiblePeriods: Int) -> (top: Double, height: Double)? {
+        let count = min(max(visiblePeriods, 1), 60)
+        let top: Double, bottom: Double
+        if item.usesCustomTime {
+            let sortedNodes = nodes.sorted { $0.node < $1.node }
+            guard !sortedNodes.isEmpty else { return nil }
+            let fullSpan = span(item, nodes: sortedNodes)
+            // Keep a readable span for lessons in breaks or outside the daily timetable.
+            top = min(fullSpan.top, max(Double(sortedNodes.count) - 0.35, 0))
+            bottom = min(top + fullSpan.height, Double(count))
+        } else {
+            top = min(max(Double(item.startNode - 1), 0), Double(count))
+            bottom = min(max(Double(item.startNode - 1 + item.nodeCount), 0), Double(count))
+        }
+        guard bottom > top else { return nil }
+        return (top, bottom - top)
+    }
+
+    static func movedStartNode(_ item: CourseOccurrence, rowDelta: Int, nodeCount: Int, visiblePeriods: Int) -> Int32 {
+        // Custom times are positioned independently of their underlying node anchor.
+        // Period-based lessons may start in a visible row and extend below it.
+        let lastRow = item.usesCustomTime ? nodeCount : max(visiblePeriods, 1)
+        let maxStart = min(lastRow, max(1, nodeCount - Int(item.nodeCount) + 1))
+        return Int32(min(max(Int(item.startNode) + rowDelta, 1), maxStart))
+    }
+
     static func span(_ item: CourseOccurrence, nodes: [TimeTableNode]) -> (top: Double, height: Double) {
         if !item.usesCustomTime { return (Double(max(item.startNode - 1, 0)), Double(max(item.nodeCount, 1))) }
         let start = position(item.startMinuteOfDay, nodes: nodes)

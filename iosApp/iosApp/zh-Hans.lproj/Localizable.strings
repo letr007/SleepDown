@@ -332,7 +332,6 @@
 "single_occurrence_replacement.help" = "修改老师或地点只会替换本次课程安排，不会修改原重复课程。";
 "value.duration_minutes" = "%@ 分钟";
 "value.points" = "%@ 点";
-"widget.more" = "还有 %@ 项";
 
 "move.scope.title" = "移动课程";
 "move.scope.this_week" = "仅本周";
@@ -359,7 +358,7 @@
 "schedule.use" = "使用";
 "schedule.delete_node" = "删除此节次";
 "appearance.preview" = "预览";
-"appearance.preview_course" = "线性代数\n教学楼 301";
+"appearance.preview_course" = "线性代数";
 "appearance.overall" = "整体";
 "appearance.choose_background" = "选择课表背景图片";
 "appearance.clear_background" = "清除背景图片";
@@ -402,3 +401,16 @@
 "widget.two_day.description" = "分别显示今日剩余课程和明日课程。";
 
 "widget.navigation.cancel" = "取消跳转";
+
+"document.csv.invalid_weeks" = "第 %@ 行的周数无效";
+
+"file.choose" = "选择文件";
+"import.download_template" = "下载模板";
+"schedule.batch_edit" = "批量调整";
+"appearance.visible_periods" = "一天显示节数";
+"appearance.preview_teacher" = "示例教师";
+"appearance.preview_room" = "教学楼 101";
+"reminder.saved.title" = "提醒设置已保存";
+"reminder.saved.disabled" = "上课和下课提醒均已关闭。";
+"reminder.saved.permission" = "通知权限未开启，请先开启通知。";
+"reminder.saved.enabled" = "已保存提醒时间和通知内容。";

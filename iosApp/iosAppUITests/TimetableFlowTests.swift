@@ -20,13 +20,72 @@ final class TimetableFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["线性代数"].waitForExistence(timeout: 5))
     }
 
-    private func openMenu(_ title: String, app: XCUIApplication) {
+    private func openWeekMenu(_ title: String, app: XCUIApplication) {
         let menu = app.buttons["课表操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 8))
         menu.tap()
         let item = app.buttons[title]
         XCTAssertTrue(item.waitForExistence(timeout: 5))
         item.tap()
+    }
+
+    private func openTimetableSettings(_ app: XCUIApplication) {
+        openWeekMenu("课表设置", app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].waitForExistence(timeout: 5))
+    }
+
+    private func tapTimetableSettingsLink(_ title: String, app: XCUIApplication) {
+        let item = app.buttons[title]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        for _ in 0..<6 {
+            if item.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(item.isHittable)
+        item.tap()
+    }
+
+    private func openTimetableSettingsLink(_ title: String, app: XCUIApplication) {
+        openTimetableSettings(app)
+        tapTimetableSettingsLink(title, app: app)
+    }
+
+    private func createTimetable(_ name: String, app: XCUIApplication) {
+        if app.buttons["创建第一张课表"].waitForExistence(timeout: 3) {
+            app.buttons["创建第一张课表"].tap()
+        } else {
+            openWeekMenu("课表管理", app: app)
+            XCTAssertTrue(app.navigationBars["课表管理"].waitForExistence(timeout: 5))
+            app.buttons["新建课表"].firstMatch.tap()
+        }
+        let field = app.textFields["课表名称"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText(name)
+        app.buttons["创建"].tap()
+        if app.navigationBars["课表管理"].exists {
+            back(app: app)
+        }
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 8))
+    }
+
+    private func openWidgetHelpFromWeek(app: XCUIApplication) {
+        if app.buttons["创建第一张课表"].exists {
+            openWeekMenu("桌面小组件", app: app)
+        } else if app.navigationBars["课表设置"].exists {
+            tapTimetableSettingsLink("桌面小组件", app: app)
+        } else {
+            openTimetableSettings(app)
+            tapTimetableSettingsLink("桌面小组件", app: app)
+        }
+    }
+
+    private func dismissDocumentExporter(app: XCUIApplication) {
+        let navigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"]
+        XCTAssertTrue(navigation.waitForExistence(timeout: 5))
+        navigation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        XCTAssertTrue(navigation.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["导出"].isHittable)
     }
 
     private func back(app: XCUIApplication) {
@@ -40,7 +99,7 @@ final class TimetableFlowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        openMenu("桌面小组件", app: app)
+        openWidgetHelpFromWeek(app: app)
         app.buttons["刷新小组件数据"].tap()
         XCTAssertTrue(app.staticTexts["共享数据已更新"].waitForExistence(timeout: 5))
         XCUIDevice.shared.press(.home)
@@ -82,6 +141,9 @@ final class TimetableFlowTests: XCTestCase {
         capture("widget-two-day-installed", app: home)
         app.activate()
         back(app: app)
+        if app.navigationBars["课表设置"].exists {
+            back(app: app)
+        }
         try verifyWidgetBindingAndTap(app: app)
     }
 
@@ -94,12 +156,8 @@ final class TimetableFlowTests: XCTestCase {
     }
 
     private func verifyWidgetBindingAndTap(app: XCUIApplication) throws {
-        openMenu("新建课表", app: app)
         let name = "小组件绑定-" + String(Int(Date().timeIntervalSince1970))
-        let field = app.textFields["课表名称"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText(name)
-        app.buttons["创建"].tap()
+        createTimetable(name, app: app)
         XCUIDevice.shared.press(.home)
         XCUIDevice.shared.press(.home)
         let home = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -129,10 +187,7 @@ final class TimetableFlowTests: XCTestCase {
         XCTAssertTrue(home.staticTexts[name].waitForExistence(timeout: 30))
         capture("widget-instance-bound", app: home)
         app.activate()
-        openMenu("新建课表", app: app)
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText(name + "其他")
-        app.buttons["创建"].tap()
+        createTimetable(name + "其他", app: app)
         XCTAssertTrue(app.staticTexts[name + "其他"].waitForExistence(timeout: 8))
         XCUIDevice.shared.press(.home)
         capture("widget-instance-after-table-switch", app: home)
@@ -150,12 +205,8 @@ final class TimetableFlowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        openMenu("新建课表", app: app)
         let name = "小组件跳转-" + String(Int(Date().timeIntervalSince1970))
-        let field = app.textFields["课表名称"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText(name)
-        app.buttons["创建"].tap()
+        createTimetable(name, app: app)
         let firstWeek = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "第 1 周 ·")).firstMatch
         let url = URL(string: "sleepdown://week?epochDay=0")!
         app.terminate()
@@ -189,41 +240,43 @@ final class TimetableFlowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        if app.buttons["创建第一张课表"].waitForExistence(timeout: 5) {
-            app.buttons["创建第一张课表"].tap()
-        } else { openMenu("新建课表", app: app) }
         let name = "二级菜单-" + String(Int(Date().timeIntervalSince1970))
+        createTimetable(name, app: app)
+
+        openTimetableSettings(app)
         let field = app.textFields["课表名称"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText(name)
-        app.buttons["创建"].tap()
-        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 8))
-
-        openMenu("课表设置", app: app)
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.navigationBars["课表设置"].exists)
         field.tap(); field.typeText("已保存")
         app.swipeUp()
         app.buttons["保存"].tap()
-        openMenu("课表设置", app: app)
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
+
+        openTimetableSettings(app)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, name + "已保存")
         capture("secondary-table-settings", app: app)
         back(app: app)
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
 
-        openMenu("外观", app: app)
+        openTimetableSettingsLink("外观", app: app)
+        let preview = app.descendants(matching: .any)["appearance.livePreview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.isHittable)
         let grid = app.switches["显示网格辅助线"]
         XCTAssertTrue(grid.waitForExistence(timeout: 5))
         grid.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         XCTAssertEqual(grid.value as? String, "1")
         capture("secondary-appearance", app: app)
         back(app: app)
-        openMenu("外观", app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        tapTimetableSettingsLink("外观", app: app)
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
         XCTAssertTrue(grid.waitForExistence(timeout: 5))
         XCTAssertEqual(grid.value as? String, "1")
         back(app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
 
-        openMenu("课程管理", app: app)
+        tapTimetableSettingsLink("课程管理", app: app)
         XCTAssertTrue(app.navigationBars["课程管理"].waitForExistence(timeout: 5))
         app.navigationBars.buttons["添加课程"].tap()
         let courseName = app.textFields["课程名称"]
@@ -234,36 +287,102 @@ final class TimetableFlowTests: XCTestCase {
         XCTAssertTrue(course.waitForExistence(timeout: 5))
         capture("secondary-course-management", app: app)
         back(app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
 
-        openMenu("时间表", app: app)
+        tapTimetableSettingsLink("时间表", app: app)
         XCTAssertTrue(app.navigationBars["可复用时间表"].waitForExistence(timeout: 5))
         capture("secondary-time-tables", app: app)
         app.buttons["新建时间表"].tap()
+        XCTAssertTrue(app.navigationBars["新建时间表"].waitForExistence(timeout: 5))
         let scheduleName = app.textFields["时间表名称"]
         XCTAssertTrue(scheduleName.waitForExistence(timeout: 5))
         scheduleName.tap(); scheduleName.typeText("菜单时间表-" + name)
+        app.buttons["完成"].tap()
+        app.buttons["批量调整"].tap()
+        XCTAssertTrue(app.navigationBars["批量调整"].waitForExistence(timeout: 5))
+        back(app: app)
+        XCTAssertTrue(app.navigationBars["新建时间表"].exists)
+        let startPicker = app.datePickers["schedule.node.1.start"]
+        XCTAssertTrue(startPicker.waitForExistence(timeout: 5))
+        startPicker.tap()
+        let minuteWheel = app.pickerWheels.element(boundBy: 1)
+        XCTAssertTrue(minuteWheel.waitForExistence(timeout: 5))
+        minuteWheel.adjust(toPickerWheelValue: "05")
+        capture("secondary-native-time-picker", app: app)
+        app.buttons["PopoverDismissRegion"].coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        XCTAssertTrue(minuteWheel.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["新建时间表"].exists)
         app.navigationBars.buttons["保存时间表"].tap()
         XCTAssertTrue(app.navigationBars["可复用时间表"].waitForExistence(timeout: 5))
+        let scheduleRow = app.cells.containing(.staticText, identifier: "菜单时间表-" + name).firstMatch
+        XCTAssertTrue(scheduleRow.waitForExistence(timeout: 5))
+        for _ in 0..<12 {
+            if scheduleRow.buttons["编辑"].isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(scheduleRow.buttons["编辑"].isHittable)
+        scheduleRow.buttons["编辑"].tap()
+        XCTAssertTrue(app.navigationBars["课表设置"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["时间表名称"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["08:05 - 08:45"].exists)
+        startPicker.tap()
+        XCTAssertTrue(minuteWheel.waitForExistence(timeout: 5))
+        minuteWheel.adjust(toPickerWheelValue: "10")
+        app.buttons["PopoverDismissRegion"].coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
         back(app: app)
+        XCTAssertTrue(app.navigationBars["可复用时间表"].exists)
+        scheduleRow.buttons["编辑"].tap()
+        XCTAssertTrue(app.textFields["时间表名称"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["08:05 - 08:45"].exists)
+        back(app: app)
+        back(app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        back(app: app)
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
 
-        openMenu("设置", app: app)
+        openTimetableSettings(app)
+        tapTimetableSettingsLink("设置", app: app)
         XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 5))
         capture("secondary-settings", app: app)
         back(app: app)
-        openMenu("桌面小组件", app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        tapTimetableSettingsLink("桌面小组件", app: app)
         XCTAssertTrue(app.buttons["刷新小组件数据"].waitForExistence(timeout: 5))
         app.buttons["刷新小组件数据"].tap()
         XCTAssertTrue(app.staticTexts["共享数据已更新"].waitForExistence(timeout: 5))
         capture("secondary-widgets", app: app)
         back(app: app)
-        openMenu("课表管理", app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        back(app: app)
+        openWeekMenu("课表管理", app: app)
         XCTAssertTrue(app.navigationBars["课表管理"].waitForExistence(timeout: 5))
         capture("secondary-management", app: app)
         back(app: app)
+
         app.terminate(); app.launch()
-        openMenu("外观", app: app)
-        XCTAssertTrue(grid.waitForExistence(timeout: 5))
-        XCTAssertEqual(grid.value as? String, "1")
+        openTimetableSettings(app)
+        let visiblePeriods = app.steppers["schedule.visiblePeriods"]
+        XCTAssertTrue(visiblePeriods.waitForExistence(timeout: 5))
+        let originalVisiblePeriods = visiblePeriods.value as? String
+        visiblePeriods.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        let updatedVisiblePeriods = visiblePeriods.value as? String
+        XCTAssertNotEqual(updatedVisiblePeriods, originalVisiblePeriods)
+        let saveSettings = app.buttons["保存"]
+        for _ in 0..<6 {
+            if saveSettings.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(saveSettings.isHittable)
+        saveSettings.tap()
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
+        openTimetableSettings(app)
+        let persistedVisiblePeriods = app.steppers["schedule.visiblePeriods"]
+        XCTAssertTrue(persistedVisiblePeriods.waitForExistence(timeout: 5))
+        XCTAssertEqual(persistedVisiblePeriods.value as? String, updatedVisiblePeriods)
+        tapTimetableSettingsLink("课程管理", app: app)
+        XCTAssertTrue(app.navigationBars["课程管理"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.containing(.staticText, identifier: "菜单测试课程").firstMatch.waitForExistence(timeout: 5))
+        back(app: app)
         back(app: app)
         XCTAssertTrue(app.buttons["菜单测试课程"].waitForExistence(timeout: 5))
     }
@@ -277,15 +396,9 @@ final class TimetableFlowTests: XCTestCase {
         let firstName = "管理A-" + suffix
         let secondName = "管理B-" + suffix
         for name in [firstName, secondName] {
-            if app.buttons["创建第一张课表"].waitForExistence(timeout: 3) { app.buttons["创建第一张课表"].tap() }
-            else { openMenu("新建课表", app: app) }
-            let field = app.textFields["课表名称"]
-            XCTAssertTrue(field.waitForExistence(timeout: 5))
-            field.tap(); field.typeText(name)
-            app.buttons["创建"].tap()
-            XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
+            createTimetable(name, app: app)
         }
-        openMenu("课表管理", app: app)
+        openWeekMenu("课表管理", app: app)
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "table.select.", firstName)).firstMatch
         let second = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "table.select.", secondName)).firstMatch
         for _ in 0..<12 {
@@ -311,18 +424,23 @@ final class TimetableFlowTests: XCTestCase {
         XCTAssertLessThan(second.frame.minY, first.frame.minY)
         capture("secondary-reorder-cancelled", app: app)
         back(app: app)
-        openMenu("时间表", app: app)
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
+        openTimetableSettings(app)
+        tapTimetableSettingsLink("时间表", app: app)
         app.buttons["新建时间表"].tap()
         let scheduleName = "范围课间-" + suffix
         let nameField = app.textFields["时间表名称"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 5))
         nameField.tap(); nameField.typeText(scheduleName)
-        // Dismiss the keyboard before interacting with the stepper.
         app.buttons["完成"].tap()
+        app.buttons["批量调整"].tap()
+        XCTAssertTrue(app.navigationBars["批量调整"].waitForExistence(timeout: 5))
         let minutes = app.steppers["schedule.break.minutes"]
         XCTAssertTrue(minutes.waitForExistence(timeout: 5))
         for _ in 0..<5 { minutes.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap() }
         app.buttons["应用课间时长"].tap()
+        back(app: app)
+        XCTAssertTrue(app.navigationBars["新建时间表"].exists)
         app.navigationBars.buttons["保存时间表"].tap()
         XCTAssertTrue(app.navigationBars["可复用时间表"].waitForExistence(timeout: 5))
         let row = app.cells.containing(.staticText, identifier: scheduleName).firstMatch
@@ -334,7 +452,6 @@ final class TimetableFlowTests: XCTestCase {
         row.buttons["编辑"].tap()
         XCTAssertTrue(nameField.waitForExistence(timeout: 5))
         XCTAssertEqual(nameField.value as? String, scheduleName)
-        app.swipeUp()
         capture("secondary-break-saved", app: app)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "09:00")).firstMatch.exists)
         let deleteNode = app.buttons["删除此节次"].firstMatch
@@ -343,7 +460,8 @@ final class TimetableFlowTests: XCTestCase {
         app.navigationBars.buttons["保存时间表"].tap()
         XCTAssertTrue(app.navigationBars["可复用时间表"].waitForExistence(timeout: 5))
         back(app: app)
-        openMenu("课程管理", app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        tapTimetableSettingsLink("课程管理", app: app)
         app.navigationBars.buttons["添加课程"].tap()
         let courseName = app.textFields["课程名称"]
         XCTAssertTrue(courseName.waitForExistence(timeout: 5))
@@ -356,8 +474,10 @@ final class TimetableFlowTests: XCTestCase {
         app.buttons["删除整门课程"].tap()
         XCTAssertTrue(app.staticTexts["还没有课程，点击添加课程开始安排。"].waitForExistence(timeout: 5))
         back(app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
+        back(app: app)
         app.terminate(); app.launch()
-        openMenu("课表管理", app: app)
+        openWeekMenu("课表管理", app: app)
         for _ in 0..<12 {
             if first.isHittable && second.isHittable && max(first.frame.maxY, second.frame.maxY) < app.frame.maxY - 90 { break }
             app.swipeUp()
@@ -372,14 +492,9 @@ final class TimetableFlowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        if app.buttons["创建第一张课表"].waitForExistence(timeout: 3) { app.buttons["创建第一张课表"].tap() }
-        else { openMenu("新建课表", app: app) }
-        let field = app.textFields["课表名称"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText("提醒验收-" + String(Int(Date().timeIntervalSince1970)))
-        app.buttons["创建"].tap()
-        openMenu("设置", app: app)
-        let reminderLink = app.buttons["提醒内容与时间"]
+        createTimetable("提醒验收-" + String(Int(Date().timeIntervalSince1970)), app: app)
+        openTimetableSettings(app)
+        let reminderLink = app.buttons["提醒设置"]
         for _ in 0..<5 {
             if reminderLink.isHittable { break }
             app.swipeUp()
@@ -390,18 +505,34 @@ final class TimetableFlowTests: XCTestCase {
         start.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         XCTAssertEqual(start.value as? String, "1")
         app.navigationBars.buttons["保存提醒设置"].tap()
+        let savedAlert = app.alerts["提醒设置已保存"]
+        XCTAssertTrue(savedAlert.waitForExistence(timeout: 8))
+        XCTAssertTrue(savedAlert.staticTexts["已保存提醒时间和通知内容。"].exists || savedAlert.staticTexts["通知权限未开启，请先开启通知。"].exists)
+        savedAlert.buttons["好"].tap()
+        XCTAssertTrue(app.navigationBars["课表设置"].waitForExistence(timeout: 5))
         XCTAssertTrue(reminderLink.waitForExistence(timeout: 5))
         reminderLink.tap()
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         XCTAssertEqual(start.value as? String, "1")
         capture("secondary-reminders", app: app)
         back(app: app)
+        XCTAssertTrue(app.navigationBars["课表设置"].exists)
         back(app: app)
+        XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
         app.buttons["导入文件"].tap()
+        XCTAssertTrue(app.buttons["选择文件"].waitForExistence(timeout: 5))
+        app.buttons["选择文件"].tap()
         let importReady = app.buttons["取消"].waitForExistence(timeout: 30)
         capture("secondary-import-picker", app: app)
         XCTAssertTrue(importReady)
         app.buttons["取消"].tap()
+        app.buttons["导入文件"].tap()
+        app.buttons["下载模板"].tap()
+        let cancelTemplate = app.descendants(matching: .any)["取消"].firstMatch
+        XCTAssertTrue(cancelTemplate.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["保存"].waitForExistence(timeout: 5))
+        capture("secondary-template-save-panel", app: app)
+        dismissDocumentExporter(app: app)
         app.buttons["导出"].tap()
         XCTAssertTrue(app.buttons["JSON 备份"].waitForExistence(timeout: 5))
         app.buttons["JSON 备份"].tap()
@@ -409,7 +540,7 @@ final class TimetableFlowTests: XCTestCase {
         XCTAssertTrue(cancelExport.waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["保存"].exists)
         capture("secondary-export-picker", app: app)
-        cancelExport.tap()
+        dismissDocumentExporter(app: app)
         XCTAssertTrue(app.buttons["课表操作"].waitForExistence(timeout: 5))
     }
 
@@ -418,18 +549,7 @@ final class TimetableFlowTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        let create = app.buttons["创建第一张课表"]
-        if create.waitForExistence(timeout: 10) {
-            create.tap()
-        } else {
-            app.buttons["课表操作"].tap()
-            app.buttons["新建课表"].tap()
-        }
-        let tableName = app.textFields["课表名称"]
-        XCTAssertTrue(tableName.waitForExistence(timeout: 5))
-        tableName.tap()
-        tableName.typeText("移植验收-" + String(Int(Date().timeIntervalSince1970)))
-        app.buttons["创建"].tap()
+        createTimetable("移植验收-" + String(Int(Date().timeIntervalSince1970)), app: app)
         let cell = app.descendants(matching: .any)["grid.cell.2.3"].firstMatch
         XCTAssertTrue(cell.waitForExistence(timeout: 10))
         XCTAssertEqual(app.tabBars.count, 0)

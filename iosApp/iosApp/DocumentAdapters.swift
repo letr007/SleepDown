@@ -52,6 +52,13 @@ enum TimetableDocumentError: LocalizedError {
 }
 
 enum TimetableDocumentCodec {
+    static func csvTemplate() -> Data {
+        Data(("\u{FEFF}课程名称,星期,开始节数,结束节数,老师,地点,周数\r\n" +
+              "高等数学,1,1,2,张老师,教学楼101,1-16\r\n" +
+              "大学英语,3,3,4,李老师,教学楼203,1-16单\r\n" +
+              "程序设计,5,5,6,王老师,实验楼301,\"2-8双,10,12\"\r\n").utf8)
+    }
+
     static func encodeJSON(_ timetable: Timetable) throws -> Data {
         try SharedInterop.encodeBackup(timetable).data(using: .utf8) ?? Data()
     }
@@ -115,7 +122,7 @@ enum TimetableDocumentCodec {
 
 private enum CSVTimetableImporter {
     static func importText(_ text: String, schedule: ReusableTimeTable) throws -> Timetable {
-        let lines = text
+        let lines = text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF}"))
             .components(separatedBy: .newlines)
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !lines.isEmpty else { throw TimetableDocumentError.emptyCSV }
@@ -146,10 +153,10 @@ private enum CSVTimetableImporter {
 
             let day = parseDay(value.first(["星期", "周几", "day", "weekday"], fallbackIndex: 3) ?? "") ?? 1
             let startNode = parseNumber(value.first([
-                "开始节", "开始节次", "起始节", "startnode", "start"
+                "开始节", "开始节次", "开始节数", "起始节", "startnode", "start"
             ], fallbackIndex: 4) ?? "") ?? 1
             let endNode = parseNumber(value.first([
-                "结束节", "结束节次", "终止节", "endnode", "end"
+                "结束节", "结束节次", "结束节数", "终止节", "endnode", "end"
             ], fallbackIndex: 5) ?? "")
             let nodeCount = max(1, endNode.map { $0 - startNode + 1 } ?? parseNumber(value.first([
                 "节数", "课时", "nodecount", "step"
@@ -184,6 +191,13 @@ private enum CSVTimetableImporter {
                 room: nil,
                 customTime: nil
             )
+            let segments: [RecurrenceSegment]
+            if let weeks = value.first(["周数", "周次", "weeks"]) {
+                segments = try parseWeeks(weeks, row: rowIndex + 1)
+                maximumWeek = max(maximumWeek, segments.map(\.endWeek).max() ?? 1)
+            } else {
+                segments = [segment]
+            }
             let slot = LogicalCourseSlot(
                 id: slotID,
                 courseId: courseID,
@@ -193,7 +207,7 @@ private enum CSVTimetableImporter {
                 teacher: teacher,
                 room: room,
                 customTime: customTime,
-                recurrenceSegments: [segment]
+                recurrenceSegments: segments
             )
             courses.append(
                 Course(
@@ -223,6 +237,35 @@ private enum CSVTimetableImporter {
             showSunday: true,
             sundayFirst: false
         )
+    }
+
+    private static func parseWeeks(_ value: String, row: Int) throws -> [RecurrenceSegment] {
+        let expression = try NSRegularExpression(pattern: "^([0-9]+)(?:-([0-9]+))?([单双]?)$")
+        let parts = value.components(separatedBy: CharacterSet(charactersIn: ",，、;"))
+        return try parts.map { part in
+            let text = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            let range = NSRange(text.startIndex..., in: text)
+            guard let match = expression.firstMatch(in: text, range: range),
+                  let startRange = Range(match.range(at: 1), in: text), let start = Int32(text[startRange]) else {
+                throw TimetableDocumentError.invalidCSV(AppLocalization.string("document.csv.invalid_weeks", String(row)))
+            }
+            let end: Int32
+            if let endRange = Range(match.range(at: 2), in: text) {
+                guard let parsedEnd = Int32(text[endRange]) else {
+                    throw TimetableDocumentError.invalidCSV(AppLocalization.string("document.csv.invalid_weeks", String(row)))
+                }
+                end = parsedEnd
+            } else {
+                end = start
+            }
+            guard start >= 1, end >= start, end <= 60 else {
+                throw TimetableDocumentError.invalidCSV(AppLocalization.string("document.csv.invalid_weeks", String(row)))
+            }
+            let patternText = Range(match.range(at: 3), in: text).map { String(text[$0]) } ?? ""
+            return RecurrenceSegment(id: UUID().uuidString, startWeek: start, endWeek: end,
+                weekPattern: parsePattern(patternText), dayOfWeek: nil, startNode: nil, nodeCount: nil,
+                teacher: nil, room: nil, customTime: nil)
+        }
     }
 
     private static func parseRow(_ line: String) -> [String] {
@@ -323,6 +366,7 @@ private enum CSVTimetableImporter {
                 if let index = headers.firstIndex(where: { normalizedNames.contains($0) }) {
                     return index < values.count ? values[index] : nil
                 }
+                return nil
             }
             if let fallbackIndex, fallbackIndex < values.count {
                 return values[fallbackIndex]
