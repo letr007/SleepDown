@@ -125,21 +125,26 @@ class WidgetConfigActivity : AppCompatActivity() {
         if (saving) return
         saving = true
         saveError = false
+        val persist: suspend () -> Unit = {
+            val style = commitWidgetBackground(this@WidgetConfigActivity, appWidgetId, configuration.style)
+            WidgetPreferences.setTableId(this@WidgetConfigActivity, appWidgetId, configuration.tableId)
+            WidgetPreferences.setShowBackground(this@WidgetConfigActivity, appWidgetId, configuration.showBackground)
+            WidgetPreferences.setShowColorBlocks(this@WidgetConfigActivity, appWidgetId, configuration.showColorBlocks)
+            style.save(this@WidgetConfigActivity, appWidgetId)
+            WidgetPreferences.setWeek(this@WidgetConfigActivity, appWidgetId, 0)
+            WidgetPreferences.setDayOffset(this@WidgetConfigActivity, appWidgetId, 0)
+            if (configuration.style.backgroundImage.isBlank()) clearWidgetBackground(this@WidgetConfigActivity, appWidgetId)
+        }
         lifecycleScope.launch {
             try {
-                val refreshed = refreshWidgetForConfiguration(this@WidgetConfigActivity, appWidgetId, widgetKind) {
-                    val style = commitWidgetBackground(this@WidgetConfigActivity, appWidgetId, configuration.style)
-                    WidgetPreferences.setTableId(this@WidgetConfigActivity, appWidgetId, configuration.tableId)
-                    WidgetPreferences.setShowBackground(this@WidgetConfigActivity, appWidgetId, configuration.showBackground)
-                    WidgetPreferences.setShowColorBlocks(this@WidgetConfigActivity, appWidgetId, configuration.showColorBlocks)
-                    style.save(this@WidgetConfigActivity, appWidgetId)
-                    WidgetPreferences.setWeek(this@WidgetConfigActivity, appWidgetId, 0)
-                    WidgetPreferences.setDayOffset(this@WidgetConfigActivity, appWidgetId, 0)
-                    if (configuration.style.backgroundImage.isBlank()) clearWidgetBackground(this@WidgetConfigActivity, appWidgetId)
-                }
+                val refreshed = refreshWidgetForConfiguration(this@WidgetConfigActivity, appWidgetId, widgetKind, persist)
                 if (!refreshed) {
-                    finish()
-                    return@launch
+                    // The host binds the widget id before starting this activity, but a host can
+                    // finish that binding late, in which case the app cannot read the widget yet.
+                    // Adding it anyway is recoverable: the provider's update broadcast renders it
+                    // with the saved configuration once the binding is visible.
+                    Log.w("WidgetConfiguration", "Widget $appWidgetId is not readable yet; saving configuration and adding it anyway")
+                    withWidgetUpdate { persist() }
                 }
                 setResult(
                     Activity.RESULT_OK,
