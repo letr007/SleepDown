@@ -240,9 +240,7 @@ abstract class SleepDownWidgetReceiver : AppWidgetProvider() {
 
     private fun updateAsync(context: Context, manager: AppWidgetManager, ids: List<Int>) {
         if (ids.isEmpty()) return
-        runAsync {
-            ids.forEach { appWidgetId -> refreshWidget(context, manager, appWidgetId, kind) }
-        }
+        runAsync { refreshWidgets(context, manager, ids, kind) }
     }
 
     private fun shiftWeekAsync(context: Context, intent: Intent, delta: Int) {
@@ -347,6 +345,9 @@ private suspend fun refreshWidget(
     beforeRefresh: suspend () -> Unit = {},
 ): Boolean = withWidgetUpdate {
     if (appWidgetManager.getAppWidgetInfo(appWidgetId) == null) return@withWidgetUpdate false
+    // Armed before the content is built: renewing the rollover refresh must not depend on
+    // this instance rendering successfully, and a failed render should be retried tomorrow.
+    scheduleNextWidgetRefresh(context)
     beforeRefresh()
     val localizedContext = context.withSleepDownAppLocales()
     initializeWidgetStyle(localizedContext, appWidgetId, kind)
@@ -1041,8 +1042,31 @@ public suspend fun refreshScheduleWidgets(context: Context) = withContext(Dispat
         WeekScheduleWidgetReceiver::class.java to WidgetKind.WEEK,
     )
     providers.forEach { (receiver, kind) ->
-        manager.getAppWidgetIds(ComponentName(context, receiver)).forEach { appWidgetId ->
+        val appWidgetIds = manager.getAppWidgetIds(ComponentName(context, receiver)).toList()
+        if (appWidgetIds.isNotEmpty()) {
+            Log.i("ScheduleWidget", "Refreshing ${receiver.simpleName} widgets $appWidgetIds")
+        }
+        refreshWidgets(context, manager, appWidgetIds, kind)
+    }
+}
+
+/**
+ * Refreshes each instance independently: a deleted or misconfigured host must not stop the
+ * remaining widgets from being updated.
+ */
+private suspend fun refreshWidgets(
+    context: Context,
+    manager: AppWidgetManager,
+    appWidgetIds: List<Int>,
+    kind: WidgetKind,
+) {
+    appWidgetIds.forEach { appWidgetId ->
+        try {
             refreshWidget(context, manager, appWidgetId, kind)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.e("ScheduleWidget", "Widget refresh failed: id=$appWidgetId, kind=$kind", error)
         }
     }
 }

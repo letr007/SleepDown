@@ -165,7 +165,10 @@ private struct SnapshotContent: View {
     let includesTomorrow: Bool
     @Environment(\.widgetFamily) private var family
     @ScaledMetric(relativeTo: .subheadline) private var rowHeight: CGFloat = 42
-    @ScaledMetric(relativeTo: .caption) private var footerHeight: CGFloat = 24
+
+    private var effectiveRowHeight: CGFloat {
+        family == .systemSmall ? rowHeight : rowHeight + 12
+    }
 
     var body: some View {
         if includesTomorrow {
@@ -190,7 +193,11 @@ private struct SnapshotContent: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
             GeometryReader { geometry in
-                let limit = WidgetPresentation.visibleItemLimit(height: geometry.size.height, rowHeight: rowHeight, footerHeight: footerHeight)
+                let limit = WidgetPresentation.visibleItemLimit(
+                    height: geometry.size.height,
+                    rowHeight: effectiveRowHeight,
+                    footerHeight: 0
+                )
                 let visible = Array(items.prefix(limit))
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(visible, id: \.occurrenceId) { item in
@@ -202,17 +209,6 @@ private struct SnapshotContent: View {
                             }.buttonStyle(.plain)
                         }
                     }
-                    if items.count > limit {
-                        let more = Text(verbatim: AppLocalization.string("widget.more", String(items.count - limit)))
-                            .font(.caption.weight(.medium)).foregroundStyle(.tint).lineLimit(1)
-                        if family == .systemSmall {
-                            more
-                        } else {
-                            Link(destination: WidgetDeepLink.weekURL(timetableID: snapshot.timetableId, epochDay: items[limit].epochDay)) {
-                                more
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -222,16 +218,41 @@ private struct SnapshotContent: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Circle().fill(Color(uiColor: UIColor(argb: item.color))).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.courseName).font(.subheadline.weight(item.isCurrent ? .bold : .regular)).lineLimit(1)
-                Text(verbatim: detail(for: item)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(item.courseName)
+                    .font(.subheadline.weight(item.isCurrent ? .bold : .regular))
+                    .lineLimit(1)
+                if family == .systemSmall {
+                    Text(verbatim: compactDetail(for: item))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text(verbatim: scheduleDetail(for: item))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if !locationAndTeacher(for: item).isEmpty {
+                        Text(verbatim: locationAndTeacher(for: item))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             Spacer(minLength: 0)
         }
-        .frame(height: rowHeight, alignment: .top)
+        .frame(height: effectiveRowHeight, alignment: .top)
         .accessibilityElement(children: .combine)
     }
 
-    private func detail(for item: WidgetSnapshotItem) -> String {
+    private func compactDetail(for item: WidgetSnapshotItem) -> String {
+        var parts = [scheduleDetail(for: item)]
+        let place = locationAndTeacher(for: item)
+        if !place.isEmpty { parts.append(place) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func scheduleDetail(for item: WidgetSnapshotItem) -> String {
         var parts = [String]()
         if snapshot.kind != .today {
             parts.append(WidgetDateSupport.formatDate(item.epochDay))
@@ -242,8 +263,6 @@ private struct SnapshotContent: View {
             WidgetDateSupport.formatTime(item.endMinuteOfDay)
         ))
         if item.isCurrent { parts.append(AppLocalization.string("widget.current")) }
-        if !item.room.isEmpty { parts.append(item.room) }
-        if !item.teacher.isEmpty { parts.append(item.teacher) }
         if item.conflictCount > 1 {
             parts.append(AppLocalization.string("widget.conflict", String(item.conflictCount)))
         }
@@ -251,6 +270,12 @@ private struct SnapshotContent: View {
             parts.append(AppLocalization.string("widget.selected"))
         }
         return parts.joined(separator: " · ")
+    }
+
+    private func locationAndTeacher(for item: WidgetSnapshotItem) -> String {
+        [item.room, item.teacher]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 }
 

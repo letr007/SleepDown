@@ -127,6 +127,7 @@ struct TimetableRootView: View {
     @EnvironmentObject private var store: TimetableStore
     @EnvironmentObject private var reminders: ReminderScheduler
     @AppStorage("appearance") private var appearance = "system"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(AppLanguage.storageKey) private var appLanguage = AppLanguage.system.rawValue
     @State private var widgetRequest: WidgetDeepLink.Request?
 
@@ -144,6 +145,7 @@ struct TimetableRootView: View {
             }
         }
         .preferredColorScheme(preferredColorScheme)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: appearance)
         .environment(\.locale, AppLanguage(rawValue: appLanguage)?.locale ?? AppLanguage.system.locale)
         .onAppear {
             AppLocalization.synchronizeWidgetLanguage(rawValue: appLanguage)
@@ -243,6 +245,7 @@ struct WeekView: View {
     @State private var pendingMove: IOSCourseMovePlan?
     @State private var showingMoveScope = false
     @State private var destination: SecondaryPage?
+    @State private var currentStyle = IOSScheduleStyle()
 
     private enum SecondaryPage { case management, timetable, courses, schedules, appearance, settings, widgets }
 
@@ -286,7 +289,7 @@ struct WeekView: View {
                         Text("SleepDown").font(.title3.bold())
                         Spacer()
                         Button { showingNewTimetable = true } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                        Button { showingImporter = true } label: { Image(systemName: "arrow.down.to.line").frame(width: 44, height: 44) }
+                        importMenu
                         Menu {
                             Button("navigation.timetable_management") { destination = .management }
                             Button("navigation.schedule") { destination = .schedules }
@@ -313,13 +316,15 @@ struct WeekView: View {
             .hidden()
         }
         .navigationBarHidden(true)
-        .onAppear { syncWeek(); openWidgetRequestIfReady() }
+        .onAppear { syncWeek(); refreshStyle(); openWidgetRequestIfReady() }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in refreshStyle() }
         .onChange(of: widgetRequest?.id) { _ in openWidgetRequestIfReady() }
         .onChange(of: canOpenWidgetRequest) { _ in openWidgetRequestIfReady() }
         .onChange(of: store.selectedTimetableID) { _ in
             pendingMove = nil
             didInitializeWeek = false
             syncWeek()
+            refreshStyle()
         }
         .confirmationDialog("move.scope.title", isPresented: $showingMoveScope, titleVisibility: .visible, presenting: pendingMove) { plan in
             Button("move.scope.this_week") { commitMove(plan, allWeeks: false) }
@@ -419,9 +424,28 @@ struct WeekView: View {
         }
     }
 
+    private func refreshStyle() {
+        guard let table = store.selectedTimetable else { currentStyle = IOSScheduleStyle(); return }
+        currentStyle = IOSScheduleStyle.read(UserDefaults.standard.data(forKey: "schedule.\(table.id).style") ?? Data())
+    }
+
+    private var importMenu: some View {
+        Menu {
+            Button("file.choose") { showingImporter = true }
+            Button("import.download_template") {
+                exportDocument = TimetableFileDocument(data: TimetableDocumentCodec.csvTemplate())
+                exportContentType = .commaSeparatedText
+                exportFilename = "SleepDown-template.csv"
+                showingExporter = true
+            }
+        } label: {
+            Image(systemName: "arrow.down.to.line").font(.system(size: 22, weight: .bold)).frame(width: 44, height: 48)
+        }.accessibilityLabel("file.import")
+    }
+
     @ViewBuilder
     private func timetableContent(_ timetable: Timetable) -> some View {
-        let style = IOSScheduleStyle.read(UserDefaults.standard.data(forKey: "schedule.\(timetable.id).style") ?? Data())
+        let style = currentStyle
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Button { showingWeeks = true } label: {
@@ -445,9 +469,7 @@ struct WeekView: View {
                     newCourseSeed = GridCourseSeed(day: 1, start: 1, count: min(2, Int(timetable.timeTable.nodes.count)))
                 } label: { Image(systemName: "plus").font(.system(size: 24)).frame(width: 44, height: 48) }
                     .accessibilityLabel("action.add_course")
-                Button { showingImporter = true } label: {
-                    Image(systemName: "arrow.down.to.line").font(.system(size: 22, weight: .bold)).frame(width: 44, height: 48)
-                }.accessibilityLabel("file.import")
+                importMenu
                 Menu {
                     Button("export.json_backup") { prepareExport(.json, timetable: timetable) }
                     Button("export.ics_calendar") { prepareExport(.ics, timetable: timetable) }
@@ -462,16 +484,6 @@ struct WeekView: View {
                     }
                     Button("navigation.timetable_management") { destination = .management }
                     Button("navigation.timetable_settings") { destination = .timetable }
-                    Button("navigation.course_management") { destination = .courses }
-                    Button("navigation.schedule") { destination = .schedules }
-                    Button("settings.appearance") { destination = .appearance }
-                    Button("tab.settings") { destination = .settings }
-                    Button("navigation.widgets") { destination = .widgets }
-                    Menu("file.export") {
-                        Button("export.json_backup") { prepareExport(.json, timetable: timetable) }
-                        Button("export.ics_calendar") { prepareExport(.ics, timetable: timetable) }
-                    }
-                    Button("action.new_timetable") { showingNewTimetable = true }
                 } label: { Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(.system(size: 23, weight: .bold)).frame(width: 36, height: 48) }
                     .accessibilityLabel("timetable.actions")
             }
@@ -2168,9 +2180,11 @@ struct TimetableEditView: View {
     @State private var firstDay: Date
     @State private var definitionID: String
     @State private var maxWeek: Int32
-    @State private var showSaturday: Bool
-    @State private var showSunday: Bool
-    @State private var sundayFirst: Bool
+    @AppStorage private var visiblePeriods: Int
+    private var displayedPeriods: Int {
+        let current = store.timetables.first { $0.id == timetable.id } ?? timetable
+        return visiblePeriods > 0 ? min(visiblePeriods, 60) : max(1, current.timeTable.nodes.count)
+    }
 
     init(timetable: Timetable) {
         self.timetable = timetable
@@ -2182,19 +2196,12 @@ struct TimetableEditView: View {
         ))
         _definitionID = State(initialValue: timetable.timeTable.id)
         _maxWeek = State(initialValue: timetable.maxWeek)
-        _showSaturday = State(initialValue: timetable.showSaturday)
-        _showSunday = State(initialValue: timetable.showSunday)
-        _sundayFirst = State(initialValue: timetable.sundayFirst)
+        _visiblePeriods = AppStorage(wrappedValue: 0, "schedule.\(timetable.id).visiblePeriods")
     }
 
     var body: some View {
         Form {
             TextField("field.timetable_name", text: $name)
-            Picker("label.schedule", selection: $definitionID) {
-                ForEach(store.timeTableDefinitions, id: \.id) { definition in
-                    Text(definition.name).tag(definition.id)
-                }
-            }
             DatePicker(
                 "label.first_week_date",
                 selection: Binding(
@@ -2214,14 +2221,19 @@ struct TimetableEditView: View {
                     value: AppLocalization.string("value.term_weeks", String(maxWeek))
                 )
             }
-            Toggle("toggle.show_saturday", isOn: $showSaturday)
-            Toggle("toggle.show_sunday", isOn: $showSunday)
-            Toggle("toggle.sunday_first", isOn: $sundayFirst)
+            Stepper(value: Binding(get: {
+                displayedPeriods
+            }, set: { visiblePeriods = $0 }), in: 1...60) {
+                FormValueRow(label: AppLocalization.string("appearance.visible_periods"), value: String(displayedPeriods))
+            }.accessibilityIdentifier("schedule.visiblePeriods")
+                .accessibilityValue(String(displayedPeriods))
             Section("section.actions") {
                 NavigationLink("settings.appearance") { ScheduleAppearanceView(tableID: timetable.id) }
                 NavigationLink("navigation.course_management") { CourseManagementView(tableID: timetable.id) }
                 NavigationLink("navigation.schedule") { ReusableTimeTableView(tableID: timetable.id) }
                 NavigationLink("navigation.widgets") { WidgetHelpView() }
+                NavigationLink("navigation.reminder_settings") { ReminderSettingsView(tableID: timetable.id) }
+                NavigationLink("navigation.settings") { SettingsView() }
             }
             Button("action.save") {
                 let selectedSchedule = store.timeTableDefinitions
@@ -2237,9 +2249,9 @@ struct TimetableEditView: View {
                     firstDayEpochDay: TimetableDates.mondayEpochDay(containing: firstDay),
                     maxWeek: maxWeek,
                     timeTable: selectedSchedule,
-                    showSaturday: showSaturday,
-                    showSunday: showSunday,
-                    sundayFirst: sundayFirst
+                    showSaturday: current.showSaturday,
+                    showSunday: current.showSunday,
+                    sundayFirst: current.sundayFirst
                 )
                 if store.updateTimetable(updated) {
                     presentationMode.wrappedValue.dismiss()
@@ -2253,9 +2265,6 @@ struct TimetableEditView: View {
             // Child pages save the bound schedule and display options independently.
             guard let current = store.timetables.first(where: { $0.id == timetable.id }) else { return }
             definitionID = current.timeTable.id
-            showSaturday = current.showSaturday
-            showSunday = current.showSunday
-            sundayFirst = current.sundayFirst
         }
         .onAppear {
             firstDay = TimetableDates.displayDate(
@@ -2266,8 +2275,6 @@ struct TimetableEditView: View {
 }
 
 struct SettingsView: View {
-    @EnvironmentObject private var store: TimetableStore
-    @EnvironmentObject private var reminders: ReminderScheduler
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage(AppLanguage.storageKey) private var appLanguage = AppLanguage.system.rawValue
     @AppStorage(EmptyWeekViewPreferences.modeKey) private var emptyViewMode = EmptyWeekViewMode.defaultView.rawValue
@@ -2277,59 +2284,6 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section(header: Text("section.data")) {
-                NavigationLink("settings.reusable_schedules") { ReusableTimeTableView() }
-                Text("settings.data.help")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if let error = store.widgetPublishError {
-                    Label("settings.widget_publish_failed", systemImage: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Button("action.retry_publish") {
-                        _ = store.retryWidgetPublish()
-                    }
-                }
-            }
-            Section(header: Text("section.reminders")) {
-                HStack {
-                    Text("reminder.authorization")
-                    Spacer()
-                    Text(reminders.authorizationState.title)
-                        .foregroundColor(reminders.authorizationState.isUsable ? .green : .secondary)
-                }
-                HStack {
-                    Text("reminder.scheduled")
-                    Spacer()
-                    Text("\(reminders.scheduledCount)")
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("reminder.remaining")
-                    Spacer()
-                    Text("\(reminders.remainingCount)")
-                        .foregroundColor(.secondary)
-                }
-                if reminders.authorizationState.isUsable && reminders.remainingCount > 0 {
-                    Button("action.supplement_reminders") { reminders.supplementPendingRequests() }
-                }
-                if reminders.authorizationState == .denied {
-                    Button("settings.open_system") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                    }
-                } else if !reminders.authorizationState.isUsable {
-                    Button("action.request_authorization") { reminders.requestAuthorization() }
-                }
-                Button("action.refresh_authorization") { reminders.refreshAuthorization() }
-                if let error = reminders.lastError {
-                    Text(error).font(.caption).foregroundColor(.red)
-                }
-                if store.selectedTimetable != nil {
-                    NavigationLink("reminder.settings.link") { ReminderSettingsView() }
-                }
-            }
             Section(header: Text("section.appearance")) {
                 Picker("settings.theme.title", selection: $appearance) {
                     Text("settings.theme.system").tag("system")
@@ -2391,7 +2345,15 @@ struct SettingsView: View {
 
 struct ReminderSettingsView: View {
     @EnvironmentObject private var store: TimetableStore
+    @EnvironmentObject private var reminders: ReminderScheduler
     @Environment(\.presentationMode) private var presentationMode
+    var tableID: String? = nil
+    @State private var resultMessage: String?
+    @State private var saved = false
+    @State private var loaded = false
+    private var timetable: Timetable? {
+        store.timetables.first { $0.id == (tableID ?? store.selectedTimetableID) }
+    }
 
     @State private var startEnabled = false
     @State private var endEnabled = false
@@ -2405,6 +2367,25 @@ struct ReminderSettingsView: View {
 
     var body: some View {
         Form {
+            Section("reminder.authorization") {
+                Text(reminders.authorizationState.title)
+                if reminders.authorizationState == .denied {
+                    Button("settings.open_system") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                } else if !reminders.authorizationState.isUsable {
+                    Button("action.request_authorization") { reminders.requestAuthorization() }
+                }
+                Button("action.refresh_authorization") { reminders.refreshAuthorization() }
+                FormValueRow(label: AppLocalization.string("reminder.scheduled"), value: String(reminders.scheduledCount))
+                FormValueRow(label: AppLocalization.string("reminder.remaining"), value: String(reminders.remainingCount))
+                if reminders.authorizationState.isUsable && reminders.remainingCount > 0 {
+                    Button("action.supplement_reminders") { reminders.supplementPendingRequests() }
+                }
+                if let error = reminders.lastError {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+            }
             Section(header: Text("section.reminder_time")) {
                 Toggle("reminder.start_toggle", isOn: $startEnabled)
                 Stepper(value: $startLead, in: 0...120, step: 5) {
@@ -2431,17 +2412,23 @@ struct ReminderSettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            Button("action.save_reminder") { save() }
-                .frame(maxWidth: .infinity)
         }
         .navigationTitle("navigation.reminder_settings")
         .navigationBarTitleDisplayMode(.inline).navigationBarHidden(false)
         .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("action.save_reminder") { save() } } }
-        .onAppear(perform: load)
+        .onAppear { reminders.refreshAuthorization(); if !loaded { load(); loaded = true } }
+        .alert(isPresented: Binding(get: { resultMessage != nil }, set: { if !$0 { resultMessage = nil } })) {
+            Alert(title: Text(saved ? "reminder.saved.title" : "alert.title"),
+                message: Text(resultMessage ?? ""),
+                dismissButton: .default(Text("action.ok")) {
+                    resultMessage = nil
+                    if saved { presentationMode.wrappedValue.dismiss() }
+                })
+        }
     }
 
     private func load() {
-        guard let settings = store.selectedTimetable?.reminderSettings else { return }
+        guard let settings = timetable?.reminderSettings else { return }
         startEnabled = settings.startEnabled
         endEnabled = settings.endEnabled
         startLead = Int(settings.startLeadMinutes)
@@ -2454,7 +2441,7 @@ struct ReminderSettingsView: View {
     }
 
     private func save() {
-        guard let timetable = store.selectedTimetable else { return }
+        guard let timetable else { return }
         let settings = ReminderSettings(
             startEnabled: startEnabled,
             endEnabled: endEnabled,
@@ -2469,8 +2456,14 @@ struct ReminderSettingsView: View {
             vibrate: timetable.reminderSettings.vibrate,
             silent: silent
         )
-        if store.updateTimetable(timetable.replacing(reminderSettings: settings)) {
-            presentationMode.wrappedValue.dismiss()
+        saved = store.updateTimetable(timetable.replacing(reminderSettings: settings))
+        if saved {
+            let key = !startEnabled && !endEnabled ? "reminder.saved.disabled"
+                : !reminders.authorizationState.isUsable ? "reminder.saved.permission" : "reminder.saved.enabled"
+            resultMessage = AppLocalization.string(key)
+        } else {
+            resultMessage = store.errorMessage ?? AppLocalization.string("alert.title")
+            store.errorMessage = nil
         }
     }
 }
@@ -2573,29 +2566,38 @@ struct TimeTableEditorView: View {
             Section(header: Text("section.basic_info")) {
                 TextField("field.schedule_name", text: $name)
             }
-            Section(header: Text("section.uniform_duration")) {
-                Stepper(value: $uniformDuration, in: 1...240) {
-                    FormValueRow(
-                        label: AppLocalization.string("label.uniform_duration"),
-                        value: AppLocalization.string("value.duration_minutes", String(uniformDuration))
-                    )
+            NavigationLink {
+                Form {
+                    Section(header: Text("section.uniform_duration")) {
+                        Stepper(value: $uniformDuration, in: 1...240) {
+                            FormValueRow(
+                                label: AppLocalization.string("label.uniform_duration"),
+                                value: AppLocalization.string("value.duration_minutes", String(uniformDuration))
+                            )
+                        }
+                        Button("action.apply_uniform_duration") {
+                            applyUniformDuration()
+                        }
+                    }
+                    Section(header: Text("section.breaks")) {
+                        Stepper(AppLocalization.string("value.duration_minutes", String(breakMinutes)), value: $breakMinutes, in: 0...240)
+                            .accessibilityIdentifier("schedule.break.minutes")
+                        Stepper(AppLocalization.string("break.first", String(breakFirst)), value: $breakFirst, in: 1...max(1, nodes.count - 1))
+                        Stepper(AppLocalization.string("break.last", String(breakLast)), value: $breakLast, in: 2...max(2, nodes.count))
+                        Button("break.apply") {
+                            do {
+                                nodes = try ReusableTimeTable(id: definition.id, name: name, nodes: nodes).applyingBreak(minutes: breakMinutes, first: breakFirst, last: breakLast).nodes
+                                errorMessage = nil
+                            } catch { errorMessage = error.localizedDescription }
+                        }
+                    }
+                    if let errorMessage { Text(errorMessage).foregroundColor(.red) }
                 }
-                Button("action.apply_uniform_duration") {
-                    applyUniformDuration()
-                }
-            }
-            Section(header: Text("section.breaks")) {
-                Stepper(AppLocalization.string("value.duration_minutes", String(breakMinutes)), value: $breakMinutes, in: 0...240)
-                    .accessibilityIdentifier("schedule.break.minutes")
-                Stepper(AppLocalization.string("break.first", String(breakFirst)), value: $breakFirst, in: 1...max(1, nodes.count - 1))
-                Stepper(AppLocalization.string("break.last", String(breakLast)), value: $breakLast, in: 2...max(2, nodes.count))
-                Button("break.apply") {
-                    do {
-                        nodes = try ReusableTimeTable(id: definition.id, name: name, nodes: nodes).applyingBreak(minutes: breakMinutes, first: breakFirst, last: breakLast).nodes
-                        errorMessage = nil
-                    } catch { errorMessage = error.localizedDescription }
-                }
-            }
+                .navigationTitle("schedule.batch_edit")
+                .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                Text("schedule.batch_edit")
+            }.accessibilityIdentifier("schedule.batch_edit")
             Section(header: Text("section.nodes")) {
                 ForEach(nodes.indices, id: \.self) { index in
                     VStack {
@@ -2622,8 +2624,6 @@ struct TimeTableEditorView: View {
             if let errorMessage {
                 Text(verbatim: errorMessage).foregroundColor(.red)
             }
-            Button("action.save_schedule") { save() }
-                .frame(maxWidth: .infinity)
         }
         .navigationTitle(Text(verbatim: AppLocalization.string(
             isNew ? "navigation.new_schedule" : "navigation.schedule_edit"
@@ -2700,8 +2700,10 @@ struct TimeTableNodeEditor: View {
             }
             HStack {
                 DatePicker("form.start_time", selection: clock(\.startMinuteOfDay), displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
                     .accessibilityIdentifier("schedule.node.\(node.node).start")
                 DatePicker("form.end_time", selection: clock(\.endMinuteOfDay), displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
                     .accessibilityIdentifier("schedule.node.\(node.node).end")
             }
         }
@@ -2819,10 +2821,14 @@ private struct ScheduleWeekGrid: View {
     @AppStorage private var styleData: Data
     @AppStorage private var imageData: Data
     private var style: IOSScheduleStyle { IOSScheduleStyle.read(styleData) }
-    private var axis: CGFloat { style.showTimeBar ? 48 : 0 }
+    @AppStorage private var visiblePeriods: Int
+    let interactive: Bool
+    private var periodCount: Int { visiblePeriods > 0 ? min(visiblePeriods, 60) : max(1, timetable.timeTable.nodes.count) }
+    private var axis: CGFloat { 48 }
 
-    init(timetable: Timetable, week: Int32, onSelect: @escaping (CourseOccurrence) -> Void, onAdd: @escaping (GridCourseSeed) -> Void, onMove: @escaping (CourseOccurrence, Int64, Int32) -> Void, onFlip: @escaping (Int) -> Void) {
-        self.timetable = timetable; self.week = week; self.onSelect = onSelect
+    init(timetable: Timetable, week: Int32, interactive: Bool = true, onSelect: @escaping (CourseOccurrence) -> Void, onAdd: @escaping (GridCourseSeed) -> Void, onMove: @escaping (CourseOccurrence, Int64, Int32) -> Void, onFlip: @escaping (Int) -> Void) {
+        self.timetable = timetable; self.week = week; self.interactive = interactive; self.onSelect = onSelect
+        _visiblePeriods = AppStorage(wrappedValue: 0, "schedule.\(timetable.id).visiblePeriods")
         self.onAdd = onAdd; self.onMove = onMove; self.onFlip = onFlip
         _rowHeight = AppStorage(wrappedValue: 66, "schedule.\(timetable.id).rowHeight")
         _textSize = AppStorage(wrappedValue: 12, "schedule.\(timetable.id).textSize")
@@ -2838,13 +2844,18 @@ private struct ScheduleWeekGrid: View {
     }
 
     var body: some View {
-        let occurrences = TimetableEngine.shared.expandOccurrences(timetable: timetable, range: TimetableDates.range(for: timetable, week: week))
         let nodes = timetable.timeTable.nodes.sorted { $0.node < $1.node }
+        let occurrences = TimetableEngine.shared.expandOccurrences(timetable: timetable, range: TimetableDates.range(for: timetable, week: week))
+            .filter { days.contains($0.epochDay) && IOSGridGeometry.visibleSpan($0, nodes: nodes, visiblePeriods: periodCount) != nil }
+        let otherCourses = style.showOtherWeeks ? IOSGridGeometry.otherWeekCourses(timetable: timetable, week: week).filter { item in
+            days.contains { TimetableDates.dayOfWeek(forEpochDay: $0, firstDayEpochDay: timetable.firstDayEpochDay) == item.dayOfWeek }
+                && IOSGridGeometry.visibleSpan(item, nodes: nodes, visiblePeriods: periodCount) != nil
+        } : []
         GeometryReader { geometry in
             let width = max((geometry.size.width - axis) / CGFloat(max(days.count, 1)), 1)
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    if style.showTimeBar { Text(monthTitle).font(.system(size: style.headerSize, weight: .bold)).frame(width: axis) }
+                    Text(monthTitle).font(.system(size: style.headerSize, weight: .bold)).frame(width: axis)
                     ForEach(days, id: \.self) { day in
                         let today = day == TimetableDates.epochDay(for: Date())
                         VStack(spacing: 2) {
@@ -2859,31 +2870,34 @@ private struct ScheduleWeekGrid: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     ZStack(alignment: .topLeading) {
                         VStack(spacing: 0) {
-                            ForEach(nodes, id: \.node) { node in
+                            ForEach(1...periodCount, id: \.self) { number in
+                                let node = nodes.first { $0.node == Int32(number) }
                                 HStack(spacing: 0) {
-                                    if style.showTimeBar {
-                                        VStack(spacing: 3) {
-                                            Text("\(node.node)").font(.system(size: 12, weight: .bold))
+                                    VStack(spacing: 2) {
+                                        Text("\(number)").font(.system(size: 12, weight: .bold))
+                                        if style.showTimeBar, let node {
                                             Text(MinuteOfDay.shared.format(minuteOfDay: node.startMinuteOfDay))
                                             Text(MinuteOfDay.shared.format(minuteOfDay: node.endMinuteOfDay))
-                                        }.font(.system(size: 9)).foregroundColor((style.interfaceColor == 0 ? Color.primary : Color.sharedCourse(style.interfaceColor))).frame(width: axis, height: rowHeight)
-                                    }
+                                        }
+                                    }.font(.system(size: 9)).foregroundColor((style.interfaceColor == 0 ? Color.primary : Color.sharedCourse(style.interfaceColor))).frame(width: axis, height: rowHeight)
                                     ForEach(days, id: \.self) { day in
                                         Color.clear.frame(width: width, height: rowHeight)
                                             .overlay(Rectangle().stroke((style.interfaceColor == 0 ? Color.primary : Color.sharedCourse(style.interfaceColor)).opacity(style.showGrid ? 0.15 : 0), lineWidth: 0.5))
                                             .contentShape(Rectangle())
                                             .onTapGesture {
-                                                selection = GridCourseSeed(day: Int(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay)), start: Int(node.node), count: 1)
+                                                if interactive, node != nil { selection = GridCourseSeed(day: Int(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay)), start: number, count: 1) }
                                             }
-                                            .accessibilityLabel(weekdayName(for: Int(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay))) + " " + String(node.node))
+                                            .accessibilityLabel(weekdayName(for: Int(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay))) + " " + String(number))
+                                            .allowsHitTesting(interactive && node != nil)
+                                            .accessibilityHidden(!interactive || node == nil)
                                             .accessibilityAddTraits(.isButton)
-                                            .accessibilityIdentifier("grid.cell.\(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay)).\(node.node)")
+                                            .accessibilityIdentifier("grid.cell.\(TimetableDates.dayOfWeek(forEpochDay: day, firstDayEpochDay: timetable.firstDayEpochDay)).\(number)")
                                     }
                                 }
                             }
                         }
                         if style.showOtherWeeks {
-                            ForEach(otherWeekCourses(current: occurrences), id: \.logicalSlotId) { item in
+                            ForEach(otherCourses, id: \.id) { item in
                                 if let dayIndex = days.firstIndex(where: {
                                     TimetableDates.dayOfWeek(forEpochDay: $0, firstDayEpochDay: timetable.firstDayEpochDay) == TimetableDates.dayOfWeek(forEpochDay: item.epochDay, firstDayEpochDay: timetable.firstDayEpochDay)
                                 }) {
@@ -2908,14 +2922,16 @@ private struct ScheduleWeekGrid: View {
                             .offset(x: axis + CGFloat(dayIndex) * width + 2, y: Double(selected.start - 1) * rowHeight + 2)
                             .accessibilityLabel("action.add_course")
                             .accessibilityIdentifier("grid.selection.add")
-                            selectionHandle(selected, upper: true, width: width, dayIndex: dayIndex, maxNode: nodes.count)
-                            selectionHandle(selected, upper: false, width: width, dayIndex: dayIndex, maxNode: nodes.count)
+                            selectionHandle(selected, upper: true, width: width, dayIndex: dayIndex, maxNode: min(periodCount, nodes.count))
+                            selectionHandle(selected, upper: false, width: width, dayIndex: dayIndex, maxNode: min(periodCount, nodes.count))
                         }
                     }
-                    .frame(height: Double(nodes.count) * rowHeight + 32)
+                    .frame(height: Double(periodCount) * rowHeight)
+                    .clipped()
+                    .padding(.bottom, 32)
                 }
                 .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
-                    guard draggingID == nil, handleStart == nil,
+                    guard interactive, draggingID == nil, handleStart == nil,
                           abs(value.translation.width) > 60,
                           abs(value.translation.width) > abs(value.translation.height) * 1.6 else { return }
                     selection = nil
@@ -2924,7 +2940,7 @@ private struct ScheduleWeekGrid: View {
             }
         }
         .overlay {
-            if occurrences.isEmpty && selection == nil && emptyMode != EmptyWeekViewMode.hidden.rawValue {
+            if occurrences.isEmpty && otherCourses.isEmpty && selection == nil && emptyMode != EmptyWeekViewMode.hidden.rawValue {
                 WeekEmptyStateView(
                     mode: EmptyWeekViewMode(rawValue: emptyMode) ?? .defaultView,
                     imageData: emptyImage,
@@ -2943,44 +2959,32 @@ private struct ScheduleWeekGrid: View {
         .onChange(of: week) { _ in selection = nil }
     }
 
-    private func otherWeekCourses(current: [CourseOccurrence]) -> [CourseOccurrence] {
-        let recurring = TimetableEngine.shared.recurringOccurrences(timetable: timetable)
-        let range = TimetableDates.range(for: timetable, week: week)
-        // A cancellation or move does not turn this week's recurring slot into an other-week course.
-        let scheduledThisWeek = recurring.filter { $0.epochDay >= range.startEpochDay && $0.epochDay <= range.endEpochDay }
-        var seen = Set((current + scheduledThisWeek).map(\.logicalSlotId))
-        return recurring.filter { item in
-            guard !seen.contains(item.logicalSlotId) else { return false }
-            seen.insert(item.logicalSlotId)
-            return true
-        }
-    }
-
     private func courseCard(_ item: CourseOccurrence, dayIndex: Int, width: CGFloat, nodes: [TimeTableNode], occurrences: [CourseOccurrence], ghost: Bool = false) -> some View {
-        let span = IOSGridGeometry.span(item, nodes: nodes)
-        let height = max(24, span.height * rowHeight - 4)
+        let span = IOSGridGeometry.visibleSpan(item, nodes: nodes, visiblePeriods: periodCount) ?? (top: 0, height: 0)
+        let height = max(1, span.height * rowHeight - 4)
         let conflict = occurrences.filter { $0.epochDay == item.epochDay && $0.startMinuteOfDay < item.endMinuteOfDay && $0.endMinuteOfDay > item.startMinuteOfDay }.count
         let dragging = draggingID == item.id
-        let content = VStack(alignment: style.centerHorizontal ? .center : .leading, spacing: 5) {
+        let content = VStack(alignment: style.centerHorizontal ? .center : .leading, spacing: 1) {
             if style.centerVertical { Spacer(minLength: 0) }
-            Text(item.courseName).font(.system(size: textSize, weight: .bold)).lineLimit(height > 100 ? 3 : 2)
-            if style.showTeacher && !item.teacher.isEmpty { Text(item.teacher).font(.system(size: max(textSize - 1, 9))).lineLimit(1) }
-            if style.showRoom && !item.room.isEmpty { Text((style.roomPrefix ? "@" : "") + item.room).font(.system(size: max(textSize - 1, 9))).lineLimit(1) }
-            if style.showTime { Text(MinuteOfDay.shared.format(minuteOfDay: item.startMinuteOfDay) + "–" + MinuteOfDay.shared.format(minuteOfDay: item.endMinuteOfDay)).font(.system(size: max(textSize - 2, 8))).lineLimit(2) }
             if ghost { Text("appearance.not_this_week").font(.system(size: 9)) }
+            Text(item.courseName).font(.system(size: textSize, weight: .bold)).lineLimit(height > 100 ? 3 : 2)
+            if style.showTeacher && !item.teacher.isEmpty { Text(item.teacher).font(.system(size: max(textSize - 1, 9))).lineLimit(height > 100 ? 2 : 1) }
+            if style.showRoom && !item.room.isEmpty { Text((style.roomPrefix ? "@" : "") + item.room).font(.system(size: max(textSize - 1, 9))).lineLimit(height > 100 ? 3 : 1) }
+            if style.showTime { Text(MinuteOfDay.shared.format(minuteOfDay: item.startMinuteOfDay) + "–" + MinuteOfDay.shared.format(minuteOfDay: item.endMinuteOfDay)).font(.system(size: max(textSize - 2, 8))).lineLimit(2) }
             if item.isRescheduled && height > 145 { Text("course.rescheduled").font(.system(size: 9)) }
             Spacer(minLength: 0)
         }
         .multilineTextAlignment(style.centerHorizontal ? .center : .leading)
         .foregroundColor(Color.sharedCourse(style.courseColor))
-        .blendMode(style.mixText ? .overlay : .normal).padding(5)
+        .blendMode(style.mixText ? .overlay : .normal).padding(3)
         .frame(width: max(width - 4, 1), height: height, alignment: style.centerHorizontal ? .top : .topLeading)
-        .background(Color.sharedCourse(item.color).opacity(ghost ? style.otherOpacity : style.opacity))
+        .background(Color.sharedCourse(item.color).opacity(style.opacity))
         .clipShape(RoundedRectangle(cornerRadius: style.radius))
         .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(Color.sharedCourse(style.borderUsesCourse ? item.color : style.borderColor), style: StrokeStyle(lineWidth: conflict > 1 ? 2 : 1, dash: style.dotted ? [3, 3] : [])))
         .overlay(alignment: .topTrailing) {
             if conflict > 1 { Text("\(conflict)").font(.system(size: 9, weight: .bold)).padding(2).background(SchedulePalette.accent).foregroundColor(.white) }
         }
+        .opacity(ghost ? style.otherOpacity : 1)
         let x: CGFloat = axis + CGFloat(dayIndex) * width + 2 + (dragging ? dragOffset.width : 0)
         let y: CGFloat = CGFloat(span.top * rowHeight) + 2 + (dragging ? dragOffset.height : 0)
         return Button {
@@ -2994,8 +2998,8 @@ private struct ScheduleWeekGrid: View {
         .simultaneousGesture(courseDrag(item, dayIndex: dayIndex, width: width, nodeCount: nodes.count))
         .offset(x: x, y: y)
         .zIndex(ghost ? 0 : dragging ? 10 : 1)
-        .allowsHitTesting(!ghost)
-        .accessibilityHidden(ghost)
+        .allowsHitTesting(interactive && !ghost)
+        .accessibilityHidden(!interactive || ghost)
         .accessibilityLabel(item.courseName)
         .accessibilityAddTraits(.isButton)
     }
@@ -3004,20 +3008,19 @@ private struct ScheduleWeekGrid: View {
         LongPressGesture(minimumDuration: 0.35, maximumDistance: 12)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .onChanged { value in
-                if case .second(true, let drag) = value {
+                if interactive, case .second(true, let drag) = value {
                     selection = nil
                     draggingID = item.id
                     dragOffset = drag?.translation ?? .zero
                 }
             }
             .onEnded { value in
-                if case .second(true, let drag) = value, let drag {
+                if interactive, case .second(true, let drag) = value, let drag {
                     let dayDelta = Int((drag.translation.width / width).rounded())
                     let day = min(max(dayIndex + dayDelta, 0), days.count - 1)
                     let rowDelta = Int((drag.translation.height / CGFloat(rowHeight)).rounded())
-                    let maxStart = max(1, nodeCount - Int(item.nodeCount) + 1)
-                    let start = min(max(Int(item.startNode) + rowDelta, 1), maxStart)
-                    onMove(item, days[day], Int32(start))
+                    let start = IOSGridGeometry.movedStartNode(item, rowDelta: rowDelta, nodeCount: nodeCount, visiblePeriods: periodCount)
+                    onMove(item, days[day], start)
                 }
                 DispatchQueue.main.async { draggingID = nil; dragOffset = .zero }
             }
@@ -3287,6 +3290,7 @@ private struct ScheduleAppearanceView: View {
     @AppStorage private var styleData: Data
     @AppStorage private var imageData: Data
     @State private var choosingImage = false
+    @State private var previewWeek: Int32 = 1
     let tableID: String
     init(tableID: String) {
         self.tableID = tableID
@@ -3320,17 +3324,35 @@ private struct ScheduleAppearanceView: View {
             ))
         })
     }
+    private func previewTable(_ table: Timetable) -> Timetable {
+        guard table.courses.isEmpty else { return table }
+        let segment = RecurrenceSegment(id: "preview-segment", startWeek: 1, endWeek: table.maxWeek, weekPattern: .all,
+            dayOfWeek: nil, startNode: nil, nodeCount: nil, teacher: nil, room: nil, customTime: nil)
+        let slot = LogicalCourseSlot(id: "preview-slot", courseId: "preview-course", dayOfWeek: 1, startNode: 1,
+            nodeCount: Int32(min(2, max(1, table.timeTable.nodes.count))), teacher: AppLocalization.string("appearance.preview_teacher"),
+            room: AppLocalization.string("appearance.preview_room"), customTime: nil, recurrenceSegments: [segment])
+        return table.replacing(courses: [Course(id: "preview-course", name: AppLocalization.string("appearance.preview_course"),
+            color: Int32(bitPattern: 0xFF648FCC), note: "", credit: 0, slots: [slot])])
+    }
     var body: some View {
-        Form {
-            Section("appearance.preview") {
-                Text("appearance.preview_course")
-                    .font(.system(size: textSize, weight: .bold))
-                    .foregroundColor(Color.sharedCourse(style.courseColor))
-                    .frame(maxWidth: .infinity, minHeight: rowHeight * 2)
-                    .background(SchedulePalette.accent.opacity(style.opacity))
-                    .clipShape(RoundedRectangle(cornerRadius: style.radius))
-                    .overlay(RoundedRectangle(cornerRadius: style.radius).stroke(Color.sharedCourse(style.borderColor), style: StrokeStyle(lineWidth: 1, dash: style.dotted ? [3, 3] : [])))
+        VStack(spacing: 0) {
+            if let table = store.timetables.first(where: { $0.id == tableID }) {
+                HStack {
+                    Text("appearance.preview").font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button { previewWeek = max(1, previewWeek - 1) } label: { Image(systemName: "chevron.left") }
+                        .disabled(previewWeek <= 1).accessibilityLabel("week.previous")
+                    Text(AppLocalization.string("week.number", String(previewWeek))).font(.caption)
+                    Button { previewWeek = min(table.maxWeek, previewWeek + 1) } label: { Image(systemName: "chevron.right") }
+                        .disabled(previewWeek >= table.maxWeek).accessibilityLabel("week.next")
+                }.padding(.horizontal).padding(.vertical, 8)
+                ScheduleWeekGrid(timetable: previewTable(table), week: previewWeek, interactive: false,
+                    onSelect: { _ in }, onAdd: { _ in }, onMove: { _, _, _ in }, onFlip: { _ in })
+                    .frame(height: 220).clipped()
+                    .background(SchedulePalette.background)
+                    .accessibilityIdentifier("appearance.livePreview")
             }
+            Form {
             Section("appearance.overall") {
                 Button("appearance.choose_background") { choosingImage = true }
                 if !imageData.isEmpty {
@@ -3367,7 +3389,13 @@ private struct ScheduleAppearanceView: View {
                 Toggle("appearance.show_teacher", isOn: preference(\.showTeacher))
             }
         }
+        }
         .navigationTitle("settings.appearance").navigationBarTitleDisplayMode(.inline).navigationBarHidden(false)
+        .onAppear {
+            if let table = store.timetables.first(where: { $0.id == tableID }) {
+                previewWeek = min(max(TimetableDates.week(forEpochDay: TimetableDates.epochDay(for: Date()), firstDayEpochDay: table.firstDayEpochDay), 1), table.maxWeek)
+            }
+        }
         .sheet(isPresented: $choosingImage) { EmptyImagePicker { imageData = $0 } }
     }
 }

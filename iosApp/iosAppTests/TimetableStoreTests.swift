@@ -584,3 +584,126 @@ extension TimetableStoreTests {
         XCTAssertEqual(WidgetPresentation.visibleItemLimit(height: 150, rowHeight: 84), 1)
     }
 }
+
+@MainActor
+extension TimetableStoreTests {
+    func testCSVTemplateImportsWeeklyOddAndSelectedWeeks() throws {
+        let table = try TimetableDocumentCodec.decode(data: TimetableDocumentCodec.csvTemplate(), filename: "template.csv", defaultTimeTable: .defaultDefinition())
+        XCTAssertEqual(table.courses.map(\.name), ["高等数学", "大学英语", "程序设计"])
+        let slots = table.courses.flatMap(\.slots)
+        XCTAssertEqual(slots.map(\.dayOfWeek), [1, 3, 5])
+        XCTAssertEqual(slots.map(\.startNode), [1, 3, 5])
+        XCTAssertEqual(slots.map(\.nodeCount), [2, 2, 2])
+        XCTAssertEqual(slots[0].teacher, "张老师")
+        XCTAssertEqual(slots[0].room, "教学楼101")
+        XCTAssertEqual(slots[1].recurrenceSegments.first?.weekPattern, .odd)
+        let programming = TimetableEngine.shared.recurringOccurrences(timetable: table).filter { $0.courseId == table.courses[2].id }
+        XCTAssertEqual(programming.map(\.week), [2, 4, 6, 8, 10, 12])
+        XCTAssertTrue(slots.allSatisfy { $0.customTime == nil })
+    }
+
+    func testCSVHeaderDoesNotTreatMissingFieldsAsLegacyColumns() throws {
+        let data = Data("课程名称,星期,开始节数,结束节数,周数\n数学,4,3,4,1-8\n".utf8)
+        let table = try TimetableDocumentCodec.decode(data: data, filename: "courses.csv", defaultTimeTable: .defaultDefinition())
+        let slot = try XCTUnwrap(table.courses.first?.slots.first)
+        XCTAssertEqual(slot.dayOfWeek, 4)
+        XCTAssertEqual(slot.startNode, 3)
+        XCTAssertEqual(slot.nodeCount, 2)
+        XCTAssertEqual(slot.teacher, "")
+        XCTAssertEqual(slot.room, "")
+        let invalid = Data("课程名称,星期,开始节数,结束节数,周数\n数学,1,1,2,1-foo\n".utf8)
+        XCTAssertThrowsError(try TimetableDocumentCodec.decode(data: invalid, filename: "bad.csv", defaultTimeTable: .defaultDefinition()))
+        let overflowing = Data("课程名称,周数\n数学,1-999999999999999\n".utf8)
+        XCTAssertThrowsError(try TimetableDocumentCodec.decode(data: overflowing, filename: "bad.csv", defaultTimeTable: .defaultDefinition()))
+    }
+
+    private func displayTable() throws -> Timetable {
+        let store = TimetableStore(inMemory: true)
+        let table = try XCTUnwrap(store.createTimetable(name: "Display"))
+        func course(_ id: String, day: Int32, start: Int32, count: Int32 = 1, first: Int32 = 1, last: Int32 = 4, pattern: WeekPattern = .all, custom: MinuteRange? = nil) -> Course {
+            let recurrence = RecurrenceSegment(id: id + "-segment", startWeek: first, endWeek: last, weekPattern: pattern,
+                dayOfWeek: nil, startNode: nil, nodeCount: nil, teacher: nil, room: nil, customTime: nil)
+            let slot = LogicalCourseSlot(id: id + "-slot", courseId: id, dayOfWeek: day, startNode: start, nodeCount: count,
+                teacher: "Teacher", room: "Room", customTime: custom, recurrenceSegments: [recurrence])
+            return Course(id: id, name: id, color: Int32(bitPattern: 0xFF648FCC), note: "", credit: 0, slots: [slot])
+        }
+        return table.replacing(maxWeek: 4, courses: [
+            course("current", day: 1, start: 1, count: 2),
+            course("clipped", day: 3, start: 5, count: 2),
+            course("overlap", day: 1, start: 2, first: 4, last: 4),
+            course("past", day: 3, start: 2, first: 1, last: 1),
+            course("future", day: 4, start: 3, first: 4, last: 4),
+            course("odd", day: 5, start: 1, pattern: .odd),
+            course("break", day: 2, start: 1, custom: MinuteRange(startMinuteOfDay: 526, endMinuteOfDay: 530)),
+            course("custom-anchor", day: 2, start: 6, custom: MinuteRange(startMinuteOfDay: 480, endMinuteOfDay: 510)),
+            course("late", day: 2, start: 1, custom: MinuteRange(startMinuteOfDay: 1380, endMinuteOfDay: 1410)),
+            course("custom", day: 6, start: 1, first: 4, last: 4, custom: MinuteRange(startMinuteOfDay: 550, endMinuteOfDay: 570))
+        ])
+    }
+
+    func testOtherWeekLessonsUseEmptyPeriodsAndIncludePastAndFuture() throws {
+        let table = try displayTable()
+        let others = IOSGridGeometry.otherWeekCourses(timetable: table, week: 2)
+        XCTAssertEqual(Set(others.map(\.courseId)), Set(["past", "future", "odd", "custom"]))
+        XCTAssertFalse(IOSGridGeometry.otherWeekCourses(timetable: table, week: 1).contains { $0.courseId == "odd" })
+        XCTAssertTrue(IOSGridGeometry.otherWeekCourses(timetable: table, week: 0).isEmpty)
+    }
+
+    func testCancelledCurrentLessonIsNotReintroducedAsAnotherWeek() throws {
+        let table = try displayTable()
+        let occurrence = try XCTUnwrap(TimetableEngine.shared.recurringOccurrences(timetable: table).first { $0.courseId == "current" && $0.week == 2 })
+        let exception = DateException(id: "cancel", logicalSlotId: occurrence.logicalSlotId, originalEpochDay: occurrence.epochDay,
+            type: .cancel, recurrenceSegmentId: nil, targetEpochDay: nil, targetDayOfWeek: nil, targetStartNode: nil,
+            targetNodeCount: nil, targetCustomTime: nil, targetTeacher: nil, targetRoom: nil)
+        let cancelled = table.replacing(dateExceptions: [exception])
+        XCTAssertFalse(IOSGridGeometry.otherWeekCourses(timetable: cancelled, week: 2).contains { $0.courseId == "current" || $0.courseId == "overlap" })
+    }
+
+    func testCustomTimeLessonsRemainVisibleBetweenAndAfterPeriods() throws {
+        let table = try displayTable()
+        let all = TimetableEngine.shared.recurringOccurrences(timetable: table)
+        let lesson = try XCTUnwrap(all.first { $0.courseId == "break" })
+        let span = try XCTUnwrap(IOSGridGeometry.visibleSpan(lesson, nodes: table.timeTable.nodes, visiblePeriods: table.timeTable.nodes.count))
+        XCTAssertEqual(span.top, 1)
+        XCTAssertGreaterThanOrEqual(span.height, 0.35 - 0.0001)
+        XCTAssertNil(IOSGridGeometry.visibleSpan(lesson, nodes: table.timeTable.nodes, visiblePeriods: 1))
+        let late = try XCTUnwrap(all.first { $0.courseId == "late" })
+        let lateSpan = try XCTUnwrap(IOSGridGeometry.visibleSpan(late, nodes: table.timeTable.nodes, visiblePeriods: table.timeTable.nodes.count))
+        XCTAssertGreaterThan(lateSpan.height, 0)
+        XCTAssertLessThanOrEqual(lateSpan.top + lateSpan.height, Double(table.timeTable.nodes.count))
+    }
+
+    func testMovingClippedLessonPreservesItsStartAndUsesRealScheduleBounds() throws {
+        let table = try displayTable()
+        let lesson = try XCTUnwrap(TimetableEngine.shared.recurringOccurrences(timetable: table).first { $0.courseId == "clipped" })
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: 0, nodeCount: 12, visiblePeriods: 5), 5)
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: 30, nodeCount: 12, visiblePeriods: 13), 11)
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: 30, nodeCount: 12, visiblePeriods: 5), 5)
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: -30, nodeCount: 12, visiblePeriods: 5), 1)
+    }
+
+    func testMovingCustomTimeLessonPreservesItsIndependentNodeAnchor() throws {
+        let table = try displayTable()
+        let lesson = try XCTUnwrap(TimetableEngine.shared.recurringOccurrences(timetable: table).first { $0.courseId == "custom-anchor" })
+        XCTAssertNotNil(IOSGridGeometry.visibleSpan(lesson, nodes: table.timeTable.nodes, visiblePeriods: 5))
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: 0, nodeCount: 12, visiblePeriods: 5), 6)
+        XCTAssertEqual(IOSGridGeometry.movedStartNode(lesson, rowDelta: 1, nodeCount: 12, visiblePeriods: 5), 7)
+    }
+
+    func testVisiblePeriodCountClipsWithoutChangingStoredLessons() throws {
+        let table = try displayTable()
+        let all = TimetableEngine.shared.recurringOccurrences(timetable: table)
+        let current = try XCTUnwrap(all.first { $0.courseId == "current" })
+        let clipped = try XCTUnwrap(IOSGridGeometry.visibleSpan(current, nodes: table.timeTable.nodes, visiblePeriods: 1))
+        XCTAssertEqual(clipped.top, 0)
+        XCTAssertEqual(clipped.height, 1)
+        XCTAssertEqual(current.nodeCount, 2)
+        let future = try XCTUnwrap(all.first { $0.courseId == "future" })
+        XCTAssertNil(IOSGridGeometry.visibleSpan(future, nodes: table.timeTable.nodes, visiblePeriods: 2))
+        let custom = try XCTUnwrap(all.first { $0.courseId == "custom" })
+        XCTAssertNil(IOSGridGeometry.visibleSpan(custom, nodes: table.timeTable.nodes, visiblePeriods: 1))
+        let span = try XCTUnwrap(IOSGridGeometry.visibleSpan(custom, nodes: table.timeTable.nodes, visiblePeriods: 2))
+        XCTAssertGreaterThan(span.top, 1)
+        XCTAssertLessThanOrEqual(span.top + span.height, 2)
+    }
+}

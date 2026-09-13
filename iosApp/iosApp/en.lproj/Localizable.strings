@@ -332,7 +332,6 @@
 "single_occurrence_replacement.help" = "Changing the teacher or location replaces only this occurrence and keeps the recurring course unchanged.";
 "value.duration_minutes" = "%@ minutes";
 "value.points" = "%@ pt";
-"widget.more" = "%@ more";
 
 "move.scope.title" = "Move course";
 "move.scope.this_week" = "This week only";
@@ -359,7 +358,7 @@
 "schedule.use" = "Use";
 "schedule.delete_node" = "Delete this period";
 "appearance.preview" = "Preview";
-"appearance.preview_course" = "Linear Algebra\nRoom 301";
+"appearance.preview_course" = "Linear Algebra";
 "appearance.overall" = "Overall";
 "appearance.choose_background" = "Choose timetable background";
 "appearance.clear_background" = "Clear background image";
@@ -402,3 +401,16 @@
 "widget.two_day.description" = "Show today’s remaining classes alongside tomorrow’s schedule.";
 
 "widget.navigation.cancel" = "Cancel navigation";
+
+"document.csv.invalid_weeks" = "Invalid weeks on row %@";
+
+"file.choose" = "Choose file";
+"import.download_template" = "Download template";
+"schedule.batch_edit" = "Batch adjustments";
+"appearance.visible_periods" = "Visible periods per day";
+"appearance.preview_teacher" = "Sample teacher";
+"appearance.preview_room" = "Building A 101";
+"reminder.saved.title" = "Reminder settings saved";
+"reminder.saved.disabled" = "Start and end reminders are off.";
+"reminder.saved.permission" = "Notifications are disabled. Enable them to receive reminders.";
+"reminder.saved.enabled" = "Reminder times and notification content saved.";
