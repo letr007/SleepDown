@@ -108,6 +108,10 @@
         </receiver>
 
         <receiver
+            android:name=".widget.WidgetRefreshReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".reminder.ReminderReceiver"
             android:exported="false" />
 

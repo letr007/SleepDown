@@ -15,19 +15,45 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.letr.sleepdown.R
+import com.letr.sleepdown.widget.refreshScheduleWidgets
 import com.letr.sleepdown.withSleepDownAppLocales
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Turns one alarm broadcast into a user-visible course reminder notification. */
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_SHOW_REMINDER) return
-        val localizedContext = context.withSleepDownAppLocales()
 
         val planId = intent.getStringExtra(EXTRA_PLAN_ID).orEmpty()
         if (planId.isBlank()) {
             Log.w(TAG, "Ignoring reminder broadcast without a plan id")
             return
         }
+
+        // The alarm fires at a course boundary, which is also when the remaining-course
+        // content changes, so the widget refresh runs alongside the notification.
+        val pendingResult = goAsync()
+        val appContext = context.applicationContext
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                postReminder(context, intent, planId)
+            } finally {
+                try {
+                    refreshScheduleWidgets(appContext)
+                } catch (error: Exception) {
+                    Log.e(TAG, "Failed to refresh widgets after reminder=$planId", error)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+        }
+    }
+
+    private fun postReminder(context: Context, intent: Intent, planId: String) {
+        val localizedContext = context.withSleepDownAppLocales()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
