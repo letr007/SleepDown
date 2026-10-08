@@ -41,6 +41,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    splits {
+        abi {
+            isEnable = providers.gradleProperty("splitApks").map(String::toBoolean).getOrElse(false)
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false
+        }
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {

@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       platform: ${{ steps.version.outputs.platform }}
+      android_version: ${{ steps.version.outputs.android_version || steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -69,13 +70,32 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - name: Build both variants, lint and test shared logic
-        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest :app:lintDebug :shared:testDebugUnitTest
+      - name: Build debug APKs, lint and test shared logic
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :shared:testDebugUnitTest
+      - name: Build ARM release APKs
+        run: ./gradlew --no-daemon :app:assembleRelease -PsplitApks=true
+      - name: Package ARM release APKs
+        env:
+          VERSION: ${{ needs.metadata.outputs.android_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+          for abi in armeabi-v7a arm64-v8a; do
+            cp "app/build/outputs/apk/release/app-$abi-release-unsigned.apk" "dist/android/SleepDown-$VERSION-android-$abi-unsigned.apk"
+          done
+          (cd dist/android && sha256sum "SleepDown-$VERSION-android-armeabi-v7a-unsigned.apk" "SleepDown-$VERSION-android-arm64-v8a-unsigned.apk" > SHA256SUMS.txt)
       - name: Upload debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload unsigned ARM release APKs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-arm-release-unsigned
+          path: dist/android/
           if-no-files-found: error
           retention-days: 7
       - name: Upload reports

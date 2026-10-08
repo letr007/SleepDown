@@ -109,7 +109,24 @@ python3 scripts/release.py validate --platform ios --tag ios-v0.1.0-beta.4
 
 PR、main 和合并队列的 CI 覆盖双端。平台发布调用 CI 时只运行选定平台的构建与测试。Android 发布不等待 iOS，iOS 发布不运行 Android 设备测试或签名任务。门禁要求所选平台任务全部成功，只有未选平台的任务可以跳过。
 
-发布标签须指向 main 的祖先提交，并与该平台完整版本一致。每次 Release 只上传该平台安装包和 `SHA256SUMS.txt`。Android APK 须通过发布证书校验。流程拒绝覆盖同标签已有的 Release 或草稿，先创建草稿，再上传并核对两个附件，最后公开发布。
+Android 发布 APK 按处理器架构分为两种：
+
+| ABI | 适用设备 | 发布文件名 |
+| --- | --- | --- |
+| `armeabi-v7a` | 支持 32 位 ARM 应用的设备 | `SleepDown-<version>-android-armeabi-v7a.apk` |
+| `arm64-v8a` | 支持 64 位 ARM 应用的设备 | `SleepDown-<version>-android-arm64-v8a.apk` |
+
+使用以下命令生成两个独立 APK，不额外生成通用包：
+
+```sh
+./gradlew :app:assembleRelease -PsplitApks=true
+```
+
+不传 `-PsplitApks=true` 时，构建仍生成通用 APK。调试构建和设备测试保持默认配置，兼容 CI 的 x86_64 模拟器。两个架构包使用相同的应用标识、版本和构建号；正式发布时均使用原发布证书签名。
+
+CI 的 `android-arm-release-unsigned` artifact 包含两个未签名架构包和 `SHA256SUMS.txt`，文件名增加 `-unsigned` 后缀。未签名包须自行签名后安装。iOS 测试包的打包方式保持不变。
+
+发布标签须指向 main 的祖先提交，并与该平台完整版本一致。Android Release 上传两个架构 APK 和 `SHA256SUMS.txt`，共 3 个附件；iOS Release 仍为 IPA 和校验和，共 2 个附件。每个 Android APK 须通过发布证书校验。流程拒绝覆盖同标签已有的 Release 或草稿，先创建草稿，再上传并核对全部附件，最后公开发布。
 
 含 SemVer 预发布标识的版本始终标记为 prerelease。只有 Android 正式版更新 GitHub 的 latest；iOS 发布保留现有 latest。证书及发布密钥的配置由发布环境管理，本地校验无需这些密钥。
 
