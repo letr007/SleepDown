@@ -81,6 +81,38 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 
 `iosApp` scheme 包含单元测试，`iosAppUI` 包含界面测试。UI 测试会创建测试课表、修改偏好并添加桌面小组件，应使用专用测试模拟器。`testExistingWidgetBindingAndTap` 要求桌面已有中尺寸 SleepDown 组件，图库用例包含添加流程。AppEntity 的独立课表配置测试需要有 Team ID 的签名环境。
 
+## 版本与发布
+
+Android 当前为 `0.1.0`，构建号 `6`。iOS 保留 `0.1.0-beta.4`，构建号 `5`。两个平台独立维护版本和构建号。
+
+| 平台 | 完整版本 | 构建号 | 发布标签 |
+| --- | --- | --- | --- |
+| Android | `app/build.gradle.kts` 的 `versionName` | 同文件的 `versionCode` | `v<version>` |
+| iOS | `iosApp/release-version.txt` | Xcode 工程中的 `CURRENT_PROJECT_VERSION` | `ios-v<version>` |
+
+完整版本须为 SemVer，不含 `+` 构建元数据。构建号须为无前导零的正整数，Android 上限为 `2,100,000,000`。iOS 各处 `MARKETING_VERSION` 须等于完整版本的基础版本，例如 `0.1.0-beta.4` 对应 `0.1.0`。各处 `CURRENT_PROJECT_VERSION` 须相同，不要求与 Android 相同。
+
+发布说明使用 `CHANGELOG.md` 中的二级标题，例如 `## Android 0.1.0` 或 `## iOS 0.1.0-beta.4`。同一平台和版本须有且只有一个非空章节。旧 beta 的无平台标题仍可使用；无平台正式版章节和另一平台章节不能用于当前平台发布。
+
+本地校验不读取签名配置，也不创建标签或 Release：
+
+```sh
+python3 -m unittest discover -s scripts -p 'test_*.py' -v
+python3 scripts/release.py validate
+python3 scripts/release.py validate --platform android --tag v0.1.0
+python3 scripts/release.py validate --platform ios --tag ios-v0.1.0-beta.4
+```
+
+未指定平台和标签时，脚本独立校验双端。`--platform` 支持 `all`、`android` 和 `ios`。只指定 `--tag` 时按标签前缀选择平台；显式平台须与标签一致。
+
+`--notes-file <path>` 只支持单平台，将该平台说明写入文件。`--github-output <path>` 追加 `platform`、`version`、`build_number`、`tag` 和 `prerelease` 字段。双端模式保留 `platform=all`，其他字段添加 `android_` 或 `ios_` 前缀。
+
+PR、main 和合并队列的 CI 覆盖双端。平台发布调用 CI 时只运行选定平台的构建与测试。Android 发布不等待 iOS，iOS 发布不运行 Android 设备测试或签名任务。门禁要求所选平台任务全部成功，只有未选平台的任务可以跳过。
+
+发布标签须指向 main 的祖先提交，并与该平台完整版本一致。每次 Release 只上传该平台安装包和 `SHA256SUMS.txt`。Android APK 须通过发布证书校验。流程拒绝覆盖同标签已有的 Release 或草稿，先创建草稿，再上传并核对两个附件，最后公开发布。
+
+含 SemVer 预发布标识的版本始终标记为 prerelease。只有 Android 正式版更新 GitHub 的 latest；iOS 发布保留现有 latest。证书及发布密钥的配置由发布环境管理，本地校验无需这些密钥。
+
 ## 目录结构
 
 | 路径 | 内容 |

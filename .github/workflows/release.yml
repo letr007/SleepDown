@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'ios-v*']
   workflow_dispatch:
 
 permissions:
@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      platform: ${{ steps.version.outputs.platform }}
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
@@ -40,12 +41,15 @@ jobs:
     name: Release checks
     needs: version
     uses: ./.github/workflows/ci.yml
+    with:
+      platform: ${{ needs.version.outputs.platform }}
     permissions:
       contents: read
 
   android:
     name: Signed Android release
     needs: [version, checks]
+    if: ${{ needs.version.outputs.platform == 'android' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -58,6 +62,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
@@ -112,6 +118,10 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [version, checks, android]
+    if: >-
+      ${{ always() && needs.version.result == 'success' && needs.checks.result == 'success' &&
+          ((needs.version.outputs.platform == 'android' && needs.android.result == 'success') ||
+           (needs.version.outputs.platform == 'ios' && needs.android.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -121,27 +131,42 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ needs.version.outputs.platform == 'android' }}
         with:
           name: android-signed
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ needs.version.outputs.platform == 'ios' }}
         with:
           name: ios-unsigned
           path: dist
       - name: Prepare notes and checksums
+        id: assets
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          PLATFORM: ${{ needs.version.outputs.platform }}
         run: |
           set -euo pipefail
-          mv dist/SleepDown-unsigned.ipa "dist/SleepDown-$VERSION-ios-unsigned.ipa"
-          python3 scripts/release.py validate --tag "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
-          printf '\n\niOS IPA 未签名，安装前须自行签名主 App 和 Widget 扩展，并配置 App Group。\n' >> "$RUNNER_TEMP/RELEASE_NOTES.md"
-          (cd dist && sha256sum "SleepDown-$VERSION-android.apk" "SleepDown-$VERSION-ios-unsigned.ipa" > SHA256SUMS.txt)
+          python3 scripts/release.py validate --platform "$PLATFORM" --tag "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
+          case "$PLATFORM" in
+            android) asset="SleepDown-$VERSION-android.apk" ;;
+            ios)
+              asset="SleepDown-$VERSION-ios-unsigned.ipa"
+              mv dist/SleepDown-unsigned.ipa "dist/$asset"
+              printf '\n\niOS IPA 未签名，安装前须自行签名主 App 和 Widget 扩展，并配置 App Group。\n' >> "$RUNNER_TEMP/RELEASE_NOTES.md"
+              ;;
+            *) echo "Unknown release platform: $PLATFORM" >&2; exit 1 ;;
+          esac
+          test -f "dist/$asset"
+          (cd dist && sha256sum "$asset" > SHA256SUMS.txt)
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
       - name: Publish only after every asset is uploaded
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          PLATFORM: ${{ needs.version.outputs.platform }}
+          ASSET: ${{ steps.assets.outputs.asset }}
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           set -euo pipefail
@@ -164,13 +189,13 @@ jobs:
           PY
           gh api --method POST "repos/$GH_REPO/releases" --input "$RUNNER_TEMP/release-request.json" > "$RUNNER_TEMP/release-created.json"
           release_id="$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["id"]))' "$RUNNER_TEMP/release-created.json")"
-          for asset in dist/*.apk dist/*.ipa dist/SHA256SUMS.txt; do
+          for asset in "dist/$ASSET" dist/SHA256SUMS.txt; do
             gh api --method POST "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets?name=$(basename "$asset")" \
               --header 'Content-Type: application/octet-stream' --input "$asset" --silent
           done
-          test "$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq length)" = 3
+          test "$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq length)" = 2
           latest=false
-          if [ "$PRERELEASE" = false ]; then latest=true; fi
+          if [ "$PLATFORM" = android ] && [ "$PRERELEASE" = false ]; then latest=true; fi
           # Publish the exact draft created above, never resolve a mutable tag again.
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
             -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --silent

@@ -7,7 +7,8 @@
 
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0--beta.4-informational?style=flat-square" alt="Version 0.1.0-beta.4"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Android_version-0.1.0-informational?style=flat-square" alt="Android Version 0.1.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/iOS_version-0.1.0--beta.4-informational?style=flat-square" alt="iOS Version 0.1.0-beta.4"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/iOS-15.0%2B-black?style=flat-square" alt="iOS 15.0+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
@@ -36,12 +37,12 @@ Android 界面使用 Jetpack Compose，iOS 使用 SwiftUI，共享课程模型�
 
 ## 下载安装
 
-在 [Releases](https://github.com/letr007/SleepDown/releases) 下载对应平台的文件：
+在 [Releases](https://github.com/letr007/SleepDown/releases) 下载对应平台的文件。两个平台分别发布：
 
-- **Android 8.0+**：下载 `.apk` 并安装。
-- **iOS 15.0+**：下载 `-unsigned.ipa`，使用自己的证书和描述文件签名后安装。IPA 不含分发签名；小组件需要 iOS 17+，签名时须为主 App 和 Widget 扩展配置一致且有权限使用的 App Group。
+- **Android 8.0+**：选择 `v<version>` 标签的 Release，下载 `.apk` 并安装。
+- **iOS 15.0+**：选择 `ios-v<version>` 标签的 Release，下载 `-unsigned.ipa`，使用自己的证书和描述文件签名后安装。IPA 不含分发签名；小组件需要 iOS 17+，签名时须为主 App 和 Widget 扩展配置一致且有权限使用的 App Group。
 
-升级前建议导出 JSON 备份。各附件的 SHA-256 校验值见同版本的 `SHA256SUMS.txt`。
+每次平台发布只包含该平台安装包和 `SHA256SUMS.txt`。旧 beta 联合 Release 的 APK 和 IPA 保留在原 `v<version>` 标签下。升级前建议导出 JSON 备份，下载后可核对 SHA-256 校验值。
 
 ## 构建与运行
 
@@ -73,7 +74,9 @@ Windows 使用 `gradlew.bat`。Release 签名、设备测试与目录结构见[�
 
 ## 当前版本
 
-`0.1.0-beta.4` 为公开测试版。性能与稳定性仍在改进，部分操作存在卡顿或应用无响应风险。
+Android 当前版本为 `0.1.0`，正式版，构建号 `6`。iOS 保留 `0.1.0-beta.4`，公开测试版，构建号 `5`。两端独立维护版本和构建号。
+
+iOS 的小组件独立课表绑定仍需在有效团队签名下验证。IPA 继续以未签名测试版提供。
 
 欢迎通过 Issue 反馈问题或提交 Pull Request。反馈时请附上版本、设备型号和复现步骤；分享截图、课表或日志前，请移除个人信息。
 

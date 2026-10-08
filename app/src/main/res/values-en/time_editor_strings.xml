@@ -4,7 +4,7 @@
     <string name="collapse">Collapse</string>
     <string name="expand">Expand</string>
     <string name="unsaved_time_table_changes">Unsaved changes</string>
-    <string name="unsaved_time_table_changes_message">Going back will discard the current time slot and timetable name changes. Continue?</string>
+    <string name="unsaved_time_table_changes_message">Going back will discard unsaved period and name changes. Go back?</string>
     <string name="appearance_preview_course">Sample course</string>
     <string name="appearance_preview_teacher">Sample teacher</string>
     <string name="appearance_preview_room">Sample room</string>
