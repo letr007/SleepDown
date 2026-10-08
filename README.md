@@ -9,6 +9,7 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Android_version-0.1.0-informational?style=flat-square" alt="Android Version 0.1.0"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square" alt="Android 8.0+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
+  <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX_DO-社区友链-FFD700?style=flat-square" alt="Linux DO 社区友链"></a>
 </p>
 
 <p align="center">
