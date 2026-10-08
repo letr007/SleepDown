@@ -124,7 +124,7 @@
     <string name="edit">Edit</string>
     <string name="hint">Notice</string>
     <string name="confirm_delete">Confirm deletion</string>
-    <string name="delete_course_confirm">Delete this class? All of its time slots will also be deleted.</string>
+    <string name="delete_course_confirm">Delete this class and all of its time slots? This action cannot be undone.</string>
     <string name="back">Back</string>
     <string name="multi_table_management">Multiple timetables</string>
     <string name="sort">Sort</string>
@@ -230,7 +230,7 @@
     <string name="room">Location</string>
     <string name="course_color">Class color</string>
     <string name="custom_time">Custom time</string>
-    <string name="custom_time_info">Custom times determine the class position using their exact time.</string>
+    <string name="custom_time_info">With custom time enabled, the class is positioned by its start and end times.</string>
     <string name="course_name">Class name</string>
     <string name="change_color">Course color</string>
     <string name="credit_optional">Credits (optional)</string>
@@ -258,7 +258,7 @@
     <string name="period_count">%1$d periods</string>
     <string name="selected">Selected</string>
     <string name="add_period">Add period</string>
-    <string name="time_table_help">Adjust as many periods as you use; extra periods can be left unused.\nTo set a different time for a particular class or location, edit that class and enable “Custom time”.</string>
+    <string name="time_table_help">Set the times for the periods you use. Extra periods can be left unused.\nTo set separate times for a class, enable “Custom time” in the class editor.</string>
     <string name="current_table_time_table">Time slots linked to this timetable</string>
     <string name="default_time_table">Default time slots</string>
     <string name="time_table_edit_hint">Tap to edit · 24-hour clock</string>
@@ -274,11 +274,11 @@
     <string name="period_added">Period %1$d added</string>
     <string name="max_periods">Up to %1$d periods</string>
     <string name="uniform_duration">Uniform period duration</string>
-    <string name="uniform_duration_warning">This will overwrite the existing end times.</string>
+    <string name="uniform_duration_warning">Recalculates each end time from its start time. Start times stay unchanged.</string>
     <string name="apply_uniform_duration">Apply</string>
     <string name="invalid_duration_minutes">Enter a duration from 1 to 240 minutes</string>
     <string name="single_day_replace_hint">Change the teacher or location to replace only this occurrence.</string>
-    <string name="period_delete_warning">Later periods will move up automatically and class schedules will be adjusted.</string>
+    <string name="period_delete_warning">Later periods will be renumbered after deletion. Class schedules will also be adjusted.</string>
     <string name="time_table_saved">Time slots saved</string>
     <string name="time_table_save_failed">Could not save time slots</string>
     <string name="switch_time_table_failed">Could not switch time slots</string>
@@ -311,12 +311,12 @@
     <string name="reminder_channel_silent_description">Class start and end reminders without sound or vibration</string>
     <string name="reminder_lesson_end">Class ended</string>
     <string name="reminder_upcoming_lesson">Class starting soon</string>
-    <string name="reminder_permission_allowed_fallback">Notifications allowed; reminders use inexact scheduling.</string>
+    <string name="reminder_permission_allowed_fallback">Notifications are allowed. Without exact alarm permission, reminders may arrive late.</string>
     <string name="reminder_permission_allowed_rebuilt">Notifications allowed; %1$d reminders rebuilt.</string>
     <string name="reminder_rebuild_failed">Could not rebuild reminders</string>
     <string name="reminder_minutes_nonnegative">Enter non-negative numbers of minutes</string>
     <string name="reminder_saved_unavailable">The system blocked reminder scheduling. Check notification and alarm permissions.</string>
-    <string name="reminder_rebuilt_inexact">Reminders scheduled. Without exact alarm permission, they may arrive slightly late.</string>
+    <string name="reminder_rebuilt_inexact">Reminders are scheduled. Without exact alarm permission, they may arrive late.</string>
     <string name="reminder_rebuilt_count">%1$d class reminders scheduled.</string>
     <string name="reminder_save_failed">Could not save reminders</string>
     <string name="system_status">System status</string>
@@ -327,7 +327,7 @@
     <string name="allow_notifications">Allow notifications</string>
     <string name="exact_time">Exact timing</string>
     <string name="available">Available</string>
-    <string name="inexact_time_description">Inexact scheduling is used without authorization</string>
+    <string name="inexact_time_description">Reminders may arrive late without exact alarm permission.</string>
     <string name="refresh_system_status">Refresh system status</string>
     <string name="reminder_time">Reminder timing</string>
     <string name="start_reminder">Class start reminder</string>
@@ -358,13 +358,13 @@
     <string name="first_monday">Monday of the first week</string>
     <string name="sleepdown_json_backup">SleepDown JSON backup</string>
     <string name="wakeup_five_line_backup">WakeUp 6.1.22 five-line backup</string>
-    <string name="json_import_description">Supports versioned backups from this app; older JSON files are read when possible.</string>
-    <string name="wakeup_import_description">Import only; WakeUp-specific backups are not generated.</string>
-    <string name="ics_import_description">Accepts the supported RFC 5545 subset; unsupported time zones or recurrence rules report an error.</string>
+    <string name="json_import_description">Supports SleepDown JSON backups and this app’s older JSON timetables.</string>
+    <string name="wakeup_import_description">Supports importing WakeUp backups. Export as a JSON backup or ICS calendar.</string>
+    <string name="ics_import_description">Supports importing ICS calendars. Unsupported time zones or recurrence rules stop the import and display an error.</string>
     <string name="importing">Importing…</string>
     <string name="choose_file">Choose file</string>
     <string name="replace_current_title">Replace current timetable?</string>
-    <string name="replace_current_message">Classes, date exceptions, and reminder settings in the current timetable will be replaced by the imported file. This action cannot be undone.</string>
+    <string name="replace_current_message">The imported file will replace classes, one-time rescheduling and cancellations, and reminder settings in the current timetable. This action cannot be undone.</string>
     <string name="continue_choose_file">Continue to choose a file</string>
     <string name="pin_widget_message">Confirm the addition on your home screen. The current timetable is selected by default.</string>
     <string name="pin_widget_unsupported">This launcher cannot add widgets from the app. Choose SleepDown from the home-screen widget list.</string>
@@ -385,9 +385,9 @@
     <string name="how_to_resize_widget">How do I resize a widget?</string>
     <string name="how_to_resize_widget_description">Long-press the widget and drag its edges. The exact steps depend on your launcher.</string>
     <string name="how_to_reconfigure_widget">How do I configure it again?</string>
-    <string name="how_to_reconfigure_widget_description">Long-press the widget and use your launcher’s reconfigure action. Classic Today and Week also have a settings button in their header.</string>
+    <string name="how_to_reconfigure_widget_description">Long-press the widget and use your launcher’s reconfigure action. Today · calendar and Weekly timetable also have a settings button in their header.</string>
     <string name="widget_update_time">When do widgets update?</string>
-    <string name="widget_update_time_description">Placed widgets refresh after classes, timetables, or time slots change. The system also checks periodically, though launchers may impose additional limits.</string>
+    <string name="widget_update_time_description">The app refreshes widgets after classes, timetables, or time slots change. It also schedules a refresh at midnight, and the system updates widgets periodically. System or launcher restrictions may delay updates.</string>
     <string name="new_label">New</string>
 
     <string name="break_time_settings">Breaks between classes</string>
@@ -400,7 +400,7 @@
     <string name="course_move_scope_title">Move scope</string>
     <string name="course_move_this_week">This week only</string>
     <string name="course_move_all_weeks">All weeks</string>
-    <string name="course_move_scope_hint">All weeks moves this time slot without changing other time slots.</string>
+    <string name="course_move_scope_hint">Choosing “All weeks” moves every week of this time slot. Other time slots stay unchanged.</string>
     <string name="aggregate_course_move_refresh_failed">Course moved, but reminders or widgets could not refresh</string>
     <string name="aggregate_course_moved">Class moved</string>
     <string name="aggregate_course_move_failed">Could not move class</string>
@@ -453,7 +453,7 @@
     <string name="drag_to_sort">Long-press to reorder</string>
     <string name="copy_table">Copy timetable</string>
     <string name="delete_table_title">Delete timetable</string>
-    <string name="delete_table_message">Delete “%1$s”? Its classes and schedules will be deleted.</string>
+    <string name="delete_table_message">Delete timetable “%1$s” and all of its classes and schedules? This action cannot be undone.</string>
     <string name="aggregate_loading_timetable">Loading timetable…</string>
     <string name="start">Start</string>
     <string name="course_name_required_aggregate">Enter a class name</string>
@@ -475,7 +475,7 @@
     <string name="fix_time_table_error">Fix the time-slot errors first</string>
     <string name="operation_failed">Operation failed</string>
     <string name="delete_time_table_title">Delete time slots</string>
-    <string name="delete_time_table_message">Time slots are independent resources and can only be deleted when no timetable uses them.</string>
+    <string name="delete_time_table_message">Only custom time slots that no timetable uses can be deleted.</string>
     <string name="time_table_deleted">Time slots deleted</string>
     <string name="current_time_table_cannot_delete">The current time slots cannot be deleted</string>
     <string name="name">Name</string>
@@ -485,7 +485,7 @@
     <string name="reusable_time_table_summary">Manage reusable period times</string>
     <string name="widget_adjust_summary">Add and adjust widgets</string>
     <string name="set_current_week_start">Set current week start date</string>
-    <string name="current_week_start_hint">Enter the Monday of this week; week mapping will update accordingly.</string>
+    <string name="current_week_start_hint">Enter the Monday of the current week. The timetable’s week numbers will adjust accordingly.</string>
     <string name="date_format">Date (yyyy-MM-dd)</string>
     <string name="invalid_original_date">The original class date is outside the timetable range</string>
     <string name="invalid_target_day">Invalid target weekday</string>

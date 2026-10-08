@@ -6,6 +6,12 @@ on:
     branches: [main]
   merge_group:
   workflow_call:
+    inputs:
+      platform:
+        description: Platforms to validate and build (all, android, ios)
+        type: string
+        required: false
+        default: all
   workflow_dispatch:
 
 permissions:
@@ -27,18 +33,25 @@ jobs:
     name: Version and release checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      platform: ${{ steps.version.outputs.platform }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
-      - run: python3 scripts/release.py validate
+      - id: version
+        env:
+          PLATFORM: ${{ inputs.platform || 'all' }}
+        run: python3 scripts/release.py validate --platform "$PLATFORM" --github-output "$GITHUB_OUTPUT"
       - name: Validate GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
   android-build:
     name: Android build and lint
+    needs: metadata
+    if: ${{ needs.metadata.outputs.platform == 'all' || needs.metadata.outputs.platform == 'android' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -75,6 +88,8 @@ jobs:
 
   android-tests:
     name: Android tests (API ${{ matrix.api }})
+    needs: metadata
+    if: ${{ needs.metadata.outputs.platform == 'all' || needs.metadata.outputs.platform == 'android' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -119,6 +134,8 @@ jobs:
 
   ios:
     name: iOS tests and release archive
+    needs: metadata
+    if: ${{ needs.metadata.outputs.platform == 'all' || needs.metadata.outputs.platform == 'ios' }}
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -190,15 +207,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every check to succeed
+      - name: Require selected checks to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
+          PLATFORM: ${{ needs.metadata.outputs.platform }}
         run: |
           python3 - <<'PY'
           import json, os
           results = json.loads(os.environ['RESULTS'])
-          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          selected = {
+              'all': {'metadata', 'android-build', 'android-tests', 'ios'},
+              'android': {'metadata', 'android-build', 'android-tests'},
+              'ios': {'metadata', 'ios'},
+          }
+          platform = os.environ['PLATFORM']
+          if platform not in selected:
+              raise SystemExit(f'Invalid CI platform: {platform!r}')
+          required = selected[platform]
+          expected = {name: ('success' if name in required else 'skipped')
+                      for name in selected['all']}
+          failed = {name: results.get(name, {}).get('result') for name, result in expected.items()
+                    if results.get(name, {}).get('result') != result}
           if failed:
-              raise SystemExit(f'CI gate failed: {failed}')
-          print('All required checks passed')
+              raise SystemExit(f'CI gate failed for {platform}: {failed}')
+          print(f'All required {platform} checks passed')
           PY

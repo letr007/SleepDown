@@ -36,8 +36,8 @@ android {
         applicationId = "com.letr.sleepdown"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.0-beta.4"
+        versionCode = 6
+        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
