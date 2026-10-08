@@ -90,21 +90,29 @@ jobs:
           with open(os.open(os.environ['SLEEPDOWN_KEYSTORE_FILE'], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
               stream.write(data)
           PY
-          ./gradlew --no-daemon :app:assembleRelease
-          test -f app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs \
-            app/build/outputs/apk/release/app-release.apk > "$RUNNER_TEMP/apk-signature.txt"
+          ./gradlew --no-daemon :app:assembleRelease -PsplitApks=true
+          for abi in armeabi-v7a arm64-v8a; do
+            apk="app/build/outputs/apk/release/app-$abi-release.apk"
+            test -f "$apk"
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs \
+              "$apk" > "$RUNNER_TEMP/apk-signature-$abi.txt"
+          done
           python3 - <<'PY'
           import os, re
           from pathlib import Path
-          report = Path(os.environ['RUNNER_TEMP'], 'apk-signature.txt').read_text()
           expected = os.environ['ANDROID_SIGNING_CERT_SHA256'].replace(':', '').strip().lower()
-          actual = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)$', report, re.M)
-          if not re.fullmatch('[a-f0-9]{64}', expected) or [value.lower() for value in actual] != [expected]:
-              raise SystemExit('APK signing certificate does not match ANDROID_SIGNING_CERT_SHA256')
+          if not re.fullmatch('[a-f0-9]{64}', expected):
+              raise SystemExit('Invalid ANDROID_SIGNING_CERT_SHA256')
+          for abi in ('armeabi-v7a', 'arm64-v8a'):
+              report = Path(os.environ['RUNNER_TEMP'], f'apk-signature-{abi}.txt').read_text()
+              actual = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)$', report, re.M)
+              if [value.lower() for value in actual] != [expected]:
+                  raise SystemExit(f'{abi} APK signing certificate does not match ANDROID_SIGNING_CERT_SHA256')
           PY
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/SleepDown-$VERSION-android.apk"
+          for abi in armeabi-v7a arm64-v8a; do
+            cp "app/build/outputs/apk/release/app-$abi-release.apk" "dist/SleepDown-$VERSION-android-$abi.apk"
+          done
       - name: Remove signing key
         if: always()
         run: rm -f -- "$RUNNER_TEMP/sleepdown-release.jks"
@@ -149,24 +157,28 @@ jobs:
           set -euo pipefail
           python3 scripts/release.py validate --platform "$PLATFORM" --tag "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md"
           case "$PLATFORM" in
-            android) asset="SleepDown-$VERSION-android.apk" ;;
+            android)
+              assets=("SleepDown-$VERSION-android-armeabi-v7a.apk" "SleepDown-$VERSION-android-arm64-v8a.apk")
+              ;;
             ios)
-              asset="SleepDown-$VERSION-ios-unsigned.ipa"
-              mv dist/SleepDown-unsigned.ipa "dist/$asset"
+              assets=("SleepDown-$VERSION-ios-unsigned.ipa")
+              mv dist/SleepDown-unsigned.ipa "dist/${assets[0]}"
               printf '\n\niOS IPA 未签名，安装前须自行签名主 App 和 Widget 扩展，并配置 App Group。\n' >> "$RUNNER_TEMP/RELEASE_NOTES.md"
               ;;
             *) echo "Unknown release platform: $PLATFORM" >&2; exit 1 ;;
           esac
-          test -f "dist/$asset"
-          (cd dist && sha256sum "$asset" > SHA256SUMS.txt)
-          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          for asset in "${assets[@]}"; do
+            test -f "dist/$asset"
+          done
+          (cd dist && sha256sum "${assets[@]}" > SHA256SUMS.txt)
+          printf 'assets=%s\n' "${assets[*]}" >> "$GITHUB_OUTPUT"
       - name: Publish only after every asset is uploaded
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           PLATFORM: ${{ needs.version.outputs.platform }}
-          ASSET: ${{ steps.assets.outputs.asset }}
+          ASSETS: ${{ steps.assets.outputs.assets }}
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           set -euo pipefail
@@ -189,11 +201,13 @@ jobs:
           PY
           gh api --method POST "repos/$GH_REPO/releases" --input "$RUNNER_TEMP/release-request.json" > "$RUNNER_TEMP/release-created.json"
           release_id="$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["id"]))' "$RUNNER_TEMP/release-created.json")"
-          for asset in "dist/$ASSET" dist/SHA256SUMS.txt; do
-            gh api --method POST "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets?name=$(basename "$asset")" \
-              --header 'Content-Type: application/octet-stream' --input "$asset" --silent
+          read -r -a assets <<< "$ASSETS"
+          assets+=(SHA256SUMS.txt)
+          for asset in "${assets[@]}"; do
+            gh api --method POST "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets?name=$asset" \
+              --header 'Content-Type: application/octet-stream' --input "dist/$asset" --silent
           done
-          test "$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq length)" = 2
+          test "$(gh api "repos/$GH_REPO/releases/$release_id/assets" --jq length)" = "${#assets[@]}"
           latest=false
           if [ "$PLATFORM" = android ] && [ "$PRERELEASE" = false ]; then latest=true; fi
           # Publish the exact draft created above, never resolve a mutable tag again.
