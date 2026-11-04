@@ -88,6 +88,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -982,6 +985,12 @@ private fun AggregateOccurrenceCard(
     val currentOnClick by rememberUpdatedState(onClick)
     val currentOnMove by rememberUpdatedState(onMove)
     val currentMovingEnabled by rememberUpdatedState(movingEnabled)
+    // Springy pickup: the card lifts instead of snapping, the way a drag handle should feel.
+    val cardScale by animateFloatAsState(
+        targetValue = if (dragging) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "occurrenceCardScale",
+    )
 
     Box(
         modifier = Modifier
@@ -989,8 +998,8 @@ private fun AggregateOccurrenceCard(
             .graphicsLayer {
                 translationX = dragX
                 translationY = dragY + if (dragging) scrollState.value - dragStartScroll else 0f
-                scaleX = if (dragging) 1.05f else 1f
-                scaleY = if (dragging) 1.05f else 1f
+                scaleX = cardScale
+                scaleY = cardScale
             }
             .zIndex(if (dragging || conflict) 2f else 1f)
             .semantics(mergeDescendants = true) {
@@ -1241,6 +1250,7 @@ private fun AggregateOccurrenceDetailsSheet(
         AggregateRescheduleDialog(
             timetable = timetable,
             occurrence = occurrence,
+            maxNode = table.nodeCount,
             onConfirm = { command -> reschedule = false; onReschedule(command) },
             onDismiss = { reschedule = false },
         )
@@ -1251,53 +1261,96 @@ private fun AggregateOccurrenceDetailsSheet(
 private fun AggregateRescheduleDialog(
     timetable: Timetable,
     occurrence: CourseOccurrence,
+    maxNode: Int,
     onConfirm: (TimetableCommand) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var dateText by remember(occurrence.id) { mutableStateOf(LocalDate.ofEpochDay(occurrence.epochDay).toString()) }
+    // The grid only renders `maxNode` rows, so targets beyond it would be invisible.
+    val nodeCount = maxNode.coerceIn(1, 60)
+    // A rescheduled lesson keeps its length, so the start node is bounded by the last legal span.
+    val lastStart = (nodeCount - occurrence.nodeCount + 1).coerceAtLeast(1)
+    var week by remember(occurrence.id) { mutableIntStateOf(occurrence.week) }
     var day by remember(occurrence.id) { mutableIntStateOf(occurrence.dayOfWeek) }
-    var startNode by remember(occurrence.id) { mutableIntStateOf(occurrence.startNode) }
+    var startNode by remember(occurrence.id) { mutableIntStateOf(occurrence.startNode.coerceIn(1, lastStart)) }
     var targetTeacher by remember(occurrence.id) { mutableStateOf(occurrence.teacher) }
     var targetRoom by remember(occurrence.id) { mutableStateOf(occurrence.room) }
+    var weekMenu by remember { mutableStateOf(false) }
     var dayMenu by remember { mutableStateOf(false) }
     var nodeMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
-
-    fun targetDateForDay(value: String, targetDay: Int): String? {
-        val parsed = runCatching { LocalDate.parse(value) }.getOrNull() ?: return null
-        val currentDay = timetableDayOf(parsed.toEpochDay(), timetable)
-        return parsed.minusDays((currentDay - 1).toLong()).plusDays((targetDay - 1).toLong()).toString()
-    }
+    // Week and weekday are the domain coordinates; the date is derived so it can never disagree.
+    val targetEpochDay = remember(week, day) { dateFor(timetable, week).toEpochDay() + (day - 1) }
+    val targetDate = LocalDate.ofEpochDay(targetEpochDay)
+    val currentLabel = stringResource(
+        R.string.weekday_with_prefix,
+        aggregateWeekdayName(occurrence.dayOfWeek),
+    ) + " " + stringResource(R.string.period_range, occurrence.startNode, occurrence.startNode + occurrence.nodeCount - 1)
+    val targetLabel = stringResource(
+        R.string.weekday_with_prefix,
+        aggregateWeekdayName(day),
+    ) + " " + stringResource(R.string.period_range, startNode, startNode + occurrence.nodeCount - 1)
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.reschedule_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(stringResource(R.string.reschedule_description), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                OutlinedTextField(value = dateText, onValueChange = { dateText = it; error = null }, label = { Text(stringResource(R.string.target_date)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(onClick = { dayMenu = true }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(day))) }
-                        DropdownMenu(expanded = dayMenu, onDismissRequest = { dayMenu = false }) {
-                            (1..7).forEach { value ->
-                                DropdownMenuItem(text = { Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(value))) }, onClick = {
-                                    targetDateForDay(dateText, value)?.let { dateText = it }
-                                    day = value
-                                    dayMenu = false
-                                })
+                        OutlinedButton(onClick = { weekMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.week_number, week))
+                        }
+                        DropdownMenu(expanded = weekMenu, onDismissRequest = { weekMenu = false }) {
+                            (1..timetable.maxWeek.coerceAtLeast(1)).forEach { value ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.week_number, value)) },
+                                    onClick = { week = value; error = null; weekMenu = false },
+                                )
                             }
                         }
                     }
                     Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(onClick = { nodeMenu = true }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.period_number, startNode)) }
-                        DropdownMenu(expanded = nodeMenu, onDismissRequest = { nodeMenu = false }) {
-                            (1..timetable.timeTable.nodes.size.coerceIn(1, 60)).forEach { value ->
-                                DropdownMenuItem(text = { Text(stringResource(R.string.period_number, value)) }, onClick = { startNode = value; nodeMenu = false })
+                        OutlinedButton(onClick = { dayMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(day)))
+                        }
+                        DropdownMenu(expanded = dayMenu, onDismissRequest = { dayMenu = false }) {
+                            (1..7).forEach { value ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(value))) },
+                                    onClick = { day = value; error = null; dayMenu = false },
+                                )
                             }
                         }
                     }
+                }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { nodeMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.period_range, startNode, startNode + occurrence.nodeCount - 1))
+                    }
+                    DropdownMenu(expanded = nodeMenu, onDismissRequest = { nodeMenu = false }) {
+                        (1..lastStart).forEach { value ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.period_range, value, value + occurrence.nodeCount - 1)) },
+                                onClick = { startNode = value; error = null; nodeMenu = false },
+                            )
+                        }
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stringResource(R.string.reschedule_current, currentLabel),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                    Text(
+                        text = stringResource(R.string.reschedule_target, "$targetLabel · " + stringResource(R.string.widget_date_month_day, targetDate.monthValue, targetDate.dayOfMonth)),
+                        fontSize = 13.sp,
+                    )
                 }
                 Text(stringResource(R.string.single_day_replace_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 OutlinedTextField(
@@ -1319,16 +1372,13 @@ private fun AggregateRescheduleDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val target = runCatching { LocalDate.parse(dateText) }.getOrNull()
                 when {
-                    target == null -> error = context.getString(R.string.valid_date_required)
-                    target.toEpochDay() !in timetable.coverageRange -> error = context.getString(R.string.target_date_out_of_range)
-                    timetableDayOf(target.toEpochDay(), timetable) != day -> error = context.getString(R.string.target_day_mismatch)
+                    targetEpochDay !in timetable.coverageRange -> error = context.getString(R.string.target_date_out_of_range)
                     else -> onConfirm(
                         TimetableCommand.RescheduleOccurrence(
                             logicalSlotId = occurrence.logicalSlotId,
                             originalEpochDay = occurrence.sourceEpochDay,
-                            targetEpochDay = target.toEpochDay(),
+                            targetEpochDay = targetEpochDay,
                             recurrenceSegmentId = occurrence.recurrenceSegmentId,
                             targetDayOfWeek = day,
                             targetStartNode = startNode,
@@ -1339,7 +1389,7 @@ private fun AggregateRescheduleDialog(
                         ),
                     )
                 }
-            }) { Text(stringResource(R.string.save_success)) }
+            }) { Text(stringResource(R.string.save)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )

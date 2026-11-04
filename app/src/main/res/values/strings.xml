@@ -247,6 +247,8 @@
     <string name="teacher">授课老师</string>
     <string name="room">上课地点</string>
     <string name="course_color">课程颜色</string>
+    <string name="recent_colors">最近使用</string>
+    <string name="hex_color">十六进制</string>
     <string name="custom_time">自定义时间</string>
     <string name="custom_time_info">开启自定义时间后，课程会按起止时间显示在课表中。</string>
     <string name="course_name">课程名称</string>
@@ -303,6 +305,7 @@
     <string name="loading">正在加载…</string>
     <string name="confirm">确定</string>
     <string name="auto_color">自</string>
+    <string name="auto_color_full">自动</string>
     <string name="select_date">选择日期</string>
     <string name="select_time">选择时间</string>
     <string name="not_selected">未选择</string>
@@ -454,6 +457,8 @@
     <string name="delete_whole_course_description">删除整门课程及其全部时间安排。</string>
     <string name="reschedule_title">调课</string>
     <string name="reschedule_description">只影响这一次安排，原来的重复规则会保留。</string>
+    <string name="reschedule_current">当前：%1$s</string>
+    <string name="reschedule_target">改为：%1$s</string>
     <string name="target_date">目标日期（yyyy-MM-dd）</string>
     <string name="valid_date_required">请输入有效日期</string>
     <string name="target_date_out_of_range">目标日期不在课表范围内</string>

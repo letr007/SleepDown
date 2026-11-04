@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -130,7 +131,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -153,7 +157,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -164,6 +171,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
@@ -1549,6 +1558,7 @@ private fun TableManagementScreen(
                         TableCard(
                             table = table,
                             selected = table.id == currentTableId,
+                            modifier = Modifier.animateItem(),
                             onClick = { onSelect(table.id) },
                             onCourses = { onCourses(table.id) },
                             onSettings = { onEditSettings(table.id) },
@@ -1587,6 +1597,7 @@ private fun TableManagementScreen(
 private fun TableCard(
     table: TableEntity,
     selected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onCourses: () -> Unit,
     onSettings: () -> Unit,
@@ -1595,7 +1606,7 @@ private fun TableCard(
     onDelete: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 24.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -2112,6 +2123,7 @@ private fun CourseManagementScreen(
                         val color = CourseColors.asColor(courseColor(course))
                         Card(
                             modifier = Modifier
+                                .animateItem()
                                 .fillMaxWidth()
                                 .height(120.dp)
                                 .padding(horizontal = 16.dp)
@@ -2162,16 +2174,15 @@ private fun CourseEditorScreen(
     var note by remember(courseId, table.id) { mutableStateOf("") }
     var credit by remember(courseId, table.id) { mutableStateOf("") }
     var color by remember(courseId, table.id) { mutableIntStateOf(0) }
+    var teacher by remember(courseId, table.id) { mutableStateOf("") }
     val drafts = remember(courseId, table.id, initialDay, initialStartNode, initialStep) { mutableStateListOf<TimeDraft>() }
     var loaded by remember(courseId, table.id, initialDay, initialStartNode, initialStep) { mutableStateOf(false) }
     var error by remember(courseId, table.id, initialDay, initialStartNode, initialStep) { mutableStateOf<String?>(null) }
     var inputTarget by remember { mutableStateOf<String?>(null) }
     var colorDialog by remember { mutableStateOf(false) }
     var roomEditorIndex by remember { mutableStateOf<Int?>(null) }
-    var teacherEditorIndex by remember { mutableStateOf<Int?>(null) }
     var openTimeDialogs by remember { mutableIntStateOf(0) }
-    val hasEditorDialog = inputTarget != null || colorDialog || roomEditorIndex != null ||
-        teacherEditorIndex != null || openTimeDialogs > 0
+    val hasEditorDialog = inputTarget != null || colorDialog || roomEditorIndex != null || openTimeDialogs > 0
     val availableNodeTimes = nodeTimesFor(table, nodeTimes)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var initialSnapshot by remember(courseId, table.id) { mutableStateOf<CourseEditorSnapshot?>(null) }
@@ -2183,7 +2194,7 @@ private fun CourseEditorScreen(
     }
     fun requestBack() {
         if (saving) return
-        val current = CourseEditorSnapshot(name, color, credit, note, drafts.toList())
+        val current = CourseEditorSnapshot(name = name, teacher = teacher, color = color, credit = credit, note = note, times = drafts.toList())
         if (initialSnapshot != null && current != initialSnapshot) discardDialog = true else leaveEditor()
     }
     fun keepEditing() {
@@ -2207,9 +2218,10 @@ private fun CourseEditorScreen(
                 note = course.note
                 credit = if (course.credit == 0f) "" else course.credit.toString()
                 color = course.color
-                drafts += courseTimeDrafts(course, repository.getCourseTimes(courseId))
+                teacher = course.teacher
+                drafts += courseTimeDrafts(repository.getCourseTimes(courseId))
             }
-            initialSnapshot = CourseEditorSnapshot(name, color, credit, note, drafts.toList())
+            initialSnapshot = CourseEditorSnapshot(name = name, teacher = teacher, color = color, credit = credit, note = note, times = drafts.toList())
             loaded = true
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -2250,11 +2262,11 @@ private fun CourseEditorScreen(
             tableId = table.id,
             name = name.trim(),
             color = if (color == 0) CourseColors.colorFor(name) else color,
-            teacher = drafts.firstOrNull()?.teacher?.trim().orEmpty(),
+            teacher = teacher.trim(),
             note = note.trim(),
             credit = credit.toFloatOrNull() ?: 0f,
         )
-        val times = drafts.flatMap { it.toEntities(entity.id) }
+        val times = drafts.flatMap { it.toEntities(entity.id, teacher.trim()) }
         focusManager.clearFocus()
         saving = true
         error = null
@@ -2294,11 +2306,20 @@ private fun CourseEditorScreen(
                     CourseBaseEditorSection(
                         name = name,
                         onNameChange = { name = it },
+                        onCandidate = { candidate ->
+                            // Reuse what the existing course already knows; never overwrite typed values.
+                            name = candidate.name
+                            if (teacher.isBlank()) teacher = candidate.teacher
+                            if (color == 0) color = candidate.color
+                            if (credit.isBlank() && candidate.credit != 0f) credit = candidate.credit.toString()
+                        },
                         candidates = existingCourses,
+                        teacher = teacher,
                         color = color,
                         credit = credit,
                         note = note,
                         onColorClick = { colorDialog = true },
+                        onTeacherClick = { inputTarget = "teacher" },
                         onCreditClick = { inputTarget = "credit" },
                         onNoteClick = { inputTarget = "note" },
                     )
@@ -2311,9 +2332,7 @@ private fun CourseEditorScreen(
                         nodeTimes = availableNodeTimes,
                         onChange = { drafts[index] = it },
                         onRemove = { drafts.removeAt(index) },
-                        onTeacher = { teacherEditorIndex = index },
                         onRoom = { roomEditorIndex = index },
-                        teacher = drafts[index].teacher,
                         onDialogVisibilityChanged = { visible -> openTimeDialogs += if (visible) 1 else -1 },
                     )
                 }
@@ -2350,9 +2369,13 @@ private fun CourseEditorScreen(
         )
     }
     inputTarget?.let { target ->
-        val initial = when (target) { "credit" -> credit; else -> note }
+        val initial = when (target) { "credit" -> credit; "teacher" -> teacher; else -> note }
         TextInputDialog(
-            title = if (target == "credit") stringResource(R.string.credits) else stringResource(R.string.notes),
+            title = when (target) {
+                "credit" -> stringResource(R.string.credits)
+                "teacher" -> stringResource(R.string.teacher)
+                else -> stringResource(R.string.notes)
+            },
             initial = initial,
             number = target == "credit",
             validation = { value ->
@@ -2361,30 +2384,14 @@ private fun CourseEditorScreen(
             multiline = target == "note",
             clearable = true,
             onConfirm = { value ->
-                if (target == "credit") credit = value else note = value
+                when (target) { "credit" -> credit = value; "teacher" -> teacher = value; else -> note = value }
                 inputTarget = null
             },
             onClear = {
-                if (target == "credit") credit = "" else note = ""
+                when (target) { "credit" -> credit = ""; "teacher" -> teacher = ""; else -> note = "" }
                 inputTarget = null
             },
             onDismiss = { inputTarget = null },
-        )
-    }
-    teacherEditorIndex?.let { index ->
-        TextInputDialog(
-            title = stringResource(R.string.teacher),
-            initial = drafts.getOrNull(index)?.teacher.orEmpty(),
-            clearable = true,
-            onConfirm = { value ->
-                drafts.getOrNull(index)?.let { drafts[index] = it.copy(teacher = value) }
-                teacherEditorIndex = null
-            },
-            onClear = {
-                drafts.getOrNull(index)?.let { drafts[index] = it.copy(teacher = "") }
-                teacherEditorIndex = null
-            },
-            onDismiss = { teacherEditorIndex = null },
         )
     }
     roomEditorIndex?.let { index ->
@@ -2398,7 +2405,17 @@ private fun CourseEditorScreen(
         )
     }
     if (colorDialog) {
-        ColorChoiceDialog(title = stringResource(R.string.course_color), initial = color, includeAuto = true, onSelect = { color = it; colorDialog = false }, onDismiss = { colorDialog = false })
+        CourseColorSheet(
+            courseName = name,
+            initial = color,
+            itemAlpha = table.itemAlpha,
+            onSelect = { picked ->
+                color = picked
+                SleepDownUiPreferences.rememberCourseColor(context, picked)
+                colorDialog = false
+            },
+            onDismiss = { colorDialog = false },
+        )
     }
 }
 
@@ -2406,11 +2423,14 @@ private fun CourseEditorScreen(
 private fun CourseBaseEditorSection(
     name: String,
     onNameChange: (String) -> Unit,
+    onCandidate: (CourseEntity) -> Unit,
     candidates: List<CourseEntity>,
+    teacher: String,
     color: Int,
     credit: String,
     note: String,
     onColorClick: () -> Unit,
+    onTeacherClick: () -> Unit,
     onCreditClick: () -> Unit,
     onNoteClick: () -> Unit,
 ) {
@@ -2436,15 +2456,40 @@ private fun CourseBaseEditorSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 candidates.distinctBy { it.name }.take(8).forEach { candidate ->
-                    OutlinedButton(onClick = { onNameChange(candidate.name) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
+                    OutlinedButton(onClick = { onCandidate(candidate) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
                         Text(candidate.name, maxLines = 1, fontSize = 12.sp)
                     }
                 }
             }
         }
-        val selectedColor = if (color == 0) MaterialTheme.colorScheme.primary else CourseColors.asColor(color)
-        SleepDownEditorRow(Icons.Default.Palette, selectedColor, onClick = onColorClick) {
-            Text(stringResource(R.string.change_color), color = selectedColor, fontSize = 14.sp)
+        SleepDownEditorRow(Icons.Default.Person, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onTeacherClick) {
+            Text(
+                if (teacher.isBlank()) stringResource(R.string.teacher_optional) else teacher,
+                color = if (teacher.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                maxLines = 1,
+            )
+        }
+        // Auto colors resolve from the course name, so the row previews what the card will show.
+        val previewColor = when {
+            color != 0 -> color
+            name.isNotBlank() -> CourseColors.colorFor(name)
+            else -> MaterialTheme.colorScheme.primary.toArgbCompat()
+        }
+        SleepDownEditorRow(Icons.Default.Palette, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onColorClick) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(CourseColors.asColor(previewColor)),
+                )
+                Text(stringResource(R.string.change_color), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            }
         }
         SleepDownEditorRow(Icons.Default.Star, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onCreditClick) {
             Text(
@@ -2493,9 +2538,7 @@ private fun TimeDraftEditor(
     nodeTimes: List<NodeTimeEntity>,
     onChange: (TimeDraft) -> Unit,
     onRemove: () -> Unit,
-    onTeacher: () -> Unit,
     onRoom: () -> Unit,
-    teacher: String,
     onDialogVisibilityChanged: (Boolean) -> Unit,
 ) {
     var weekDialog by remember(draft.id, index) { mutableStateOf(false) }
@@ -2551,14 +2594,6 @@ private fun TimeDraftEditor(
                 OutlinedButton(onClick = { customTimeField = "start" }, modifier = Modifier.weight(1f)) { Text(draft.startTime.ifBlank { stringResource(R.string.class_start_time) }) }
                 OutlinedButton(onClick = { customTimeField = "end" }, modifier = Modifier.weight(1f)) { Text(draft.endTime.ifBlank { stringResource(R.string.class_end_time) }) }
             }
-        }
-        SleepDownEditorRow(Icons.Default.Person, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onTeacher) {
-            Text(
-                if (teacher.isBlank()) stringResource(R.string.teacher_optional) else teacher,
-                color = if (teacher.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-                maxLines = 1,
-            )
         }
         SleepDownEditorRow(Icons.Default.Place, MaterialTheme.colorScheme.onSurfaceVariant, onClick = onRoom) {
             Text(
@@ -3370,6 +3405,296 @@ private fun TextInputDialog(
             }
         },
     )
+}
+
+/**
+ * Course color picker in the classic editor layout: a saturation/value square, a hue
+ * strip, and fully adjustable R/G/B channels kept in sync with the hex field.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CourseColorSheet(
+    courseName: String,
+    initial: Int,
+    itemAlpha: Float,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val recent = remember { SleepDownUiPreferences.recentCourseColors(context) }
+    val start = remember(initial) { Color(if (initial == 0) 0xFF1E88E5.toInt() else initial) }
+    val startHsv = remember(start) { start.toHsv() }
+    var hue by remember(initial) { mutableFloatStateOf(startHsv.first) }
+    var saturation by remember(initial) { mutableFloatStateOf(startHsv.second.takeIf { it > 0f } ?: 0.72f) }
+    var brightness by remember(initial) { mutableFloatStateOf(startHsv.third.takeIf { it > 0f } ?: 0.9f) }
+    var hexInput by remember(initial) { mutableStateOf(start.toHexString()) }
+    val pending = Color.hsv(hue, saturation, brightness)
+
+    LaunchedEffect(pending) {
+        val current = pending.toHexString()
+        if (!hexInput.equals(current, ignoreCase = true)) hexInput = current
+    }
+
+    fun applyHex(parsed: Color) {
+        val hsv = parsed.toHsv()
+        hue = hsv.first
+        saturation = hsv.second
+        brightness = hsv.third
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.course_color),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onSelect(0) }) { Text(stringResource(R.string.auto_color_full)) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CourseColorPreview(courseName = courseName, color = pending.toArgbCompat(), itemAlpha = itemAlpha)
+                SaturationValueSquare(
+                    hue = hue,
+                    saturation = saturation,
+                    brightness = brightness,
+                    modifier = Modifier.fillMaxWidth().height(132.dp),
+                    onChange = { s, v -> saturation = s; brightness = v },
+                )
+                HueStrip(
+                    hue = hue,
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    onChange = { hue = it },
+                )
+                RgbChannelRow(
+                    label = "R",
+                    value = pending.red,
+                    gradient = Brush.horizontalGradient(listOf(Color(0f, pending.green, pending.blue), Color(1f, pending.green, pending.blue))),
+                    onChange = { applyHex(Color(it, pending.green, pending.blue)) },
+                )
+                RgbChannelRow(
+                    label = "G",
+                    value = pending.green,
+                    gradient = Brush.horizontalGradient(listOf(Color(pending.red, 0f, pending.blue), Color(pending.red, 1f, pending.blue))),
+                    onChange = { applyHex(Color(pending.red, it, pending.blue)) },
+                )
+                RgbChannelRow(
+                    label = "B",
+                    value = pending.blue,
+                    gradient = Brush.horizontalGradient(listOf(Color(pending.red, pending.green, 0f), Color(pending.red, pending.green, 1f))),
+                    onChange = { applyHex(Color(pending.red, pending.green, it)) },
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = hexInput,
+                        onValueChange = { text ->
+                            hexInput = text
+                            parseHexColor(text)?.let(::applyHex)
+                        },
+                        label = { Text(stringResource(R.string.hex_color)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (recent.isNotEmpty()) {
+                    ColorSectionLabel(stringResource(R.string.recent_colors))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        recent.forEach { color ->
+                            ColorSwatch(
+                                color = color,
+                                selected = color == pending.toArgbCompat(),
+                                modifier = Modifier.size(30.dp),
+                            ) { applyHex(Color(color)) }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { onSelect(pending.toArgbCompat()) }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/** Saturation (x) over brightness (y) for the current hue. */
+@Composable
+private fun SaturationValueSquare(
+    hue: Float,
+    saturation: Float,
+    brightness: Float,
+    modifier: Modifier,
+    onChange: (Float, Float) -> Unit,
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .pointerInput(hue) {
+                fun update(position: Offset) {
+                    onChange(
+                        (position.x / size.width).coerceIn(0f, 1f),
+                        (1f - position.y / size.height).coerceIn(0f, 1f),
+                    )
+                }
+                detectDragGestures(onDragStart = { update(it) }) { change, _ ->
+                    change.consume()
+                    update(change.position)
+                }
+            },
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.hsv(hue, 1f, 1f)))
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.White, Color.Transparent))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black))))
+        val thumb = 18.dp
+        Box(
+            Modifier
+                .offset(x = (maxWidth - thumb) * saturation, y = (maxHeight - thumb) * (1f - brightness))
+                .size(thumb)
+                .clip(CircleShape)
+                .background(Color.hsv(hue, saturation, brightness))
+                .border(2.dp, Color.White, CircleShape),
+        )
+    }
+}
+
+@Composable
+private fun HueStrip(hue: Float, modifier: Modifier, onChange: (Float) -> Unit) {
+    val hues = remember { List(25) { Color.hsv(it * 15f, 1f, 1f) } }
+    BoxWithConstraints(
+        modifier = modifier.pointerInput(Unit) {
+            fun update(position: Offset) {
+                onChange((position.x / size.width * 360f).coerceIn(0f, 359f))
+            }
+            detectDragGestures(onDragStart = { update(it) }) { change, _ ->
+                change.consume()
+                update(change.position)
+            }
+        },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(8.dp)).background(Brush.horizontalGradient(hues)))
+        Box(
+            Modifier
+                .offset(x = (maxWidth - 10.dp) * (hue / 360f))
+                .width(10.dp)
+                .height(22.dp)
+                .shadow(2.dp, RoundedCornerShape(5.dp))
+                .background(Color.White, RoundedCornerShape(5.dp)),
+        )
+    }
+}
+
+@Composable
+private fun RgbChannelRow(label: String, value: Float, gradient: Brush, onChange: (Float) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(14.dp))
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp)
+                .pointerInput(Unit) {
+                    fun update(position: Offset) {
+                        onChange((position.x / size.width).coerceIn(0f, 1f))
+                    }
+                    detectDragGestures(onDragStart = { update(it) }) { change, _ ->
+                        change.consume()
+                        update(change.position)
+                    }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(gradient))
+            Box(
+                Modifier
+                    .offset(x = (maxWidth - 20.dp) * value)
+                    .size(20.dp)
+                    .shadow(2.dp, CircleShape)
+                    .background(Color.White, CircleShape),
+            )
+        }
+        Text(
+            text = (value * 255f).roundToInt().toString(),
+            fontSize = 12.sp,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(32.dp),
+        )
+    }
+}
+
+/**
+ * Mirrors how the grid paints a card: the course color composited over the table
+ * background at `itemAlpha`, so the preview cannot promise a color the grid will not show.
+ */
+@Composable
+private fun CourseColorPreview(courseName: String, color: Int, itemAlpha: Float) {
+    val blended = lerp(MaterialTheme.colorScheme.surface, CourseColors.asColor(color), itemAlpha.coerceIn(0f, 1f))
+    Surface(color = blended, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = courseName.ifBlank { stringResource(R.string.course_name) },
+            color = CourseColors.onColor(blended.toArgbCompat()),
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+        )
+    }
+}
+
+@Composable
+private fun ColorSectionLabel(text: String) {
+    Text(text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+private fun Color.toHexString(): String =
+    "#%02X%02X%02X".format((red * 255f).roundToInt(), (green * 255f).roundToInt(), (blue * 255f).roundToInt())
+
+private fun parseHexColor(text: String): Color? {
+    val cleaned = text.trim().removePrefix("#")
+    if (cleaned.length != 6 || cleaned.any { it !in "0123456789abcdefABCDEF" }) return null
+    val value = cleaned.toIntOrNull(16) ?: return null
+    return Color(0xFF000000.toInt() or value)
+}
+
+private fun Color.toHsv(): Triple<Float, Float, Float> {
+    val max = maxOf(red, green, blue)
+    val min = minOf(red, green, blue)
+    val delta = max - min
+    val hue = when {
+        delta == 0f -> 0f
+        max == red -> 60f * (((green - blue) / delta) % 6f)
+        max == green -> 60f * (((blue - red) / delta) + 2f)
+        else -> 60f * (((red - green) / delta) + 4f)
+    }
+    return Triple((hue + 360f) % 360f, if (max == 0f) 0f else delta / max, max)
+}
+
+@Composable
+private fun ColorSwatch(color: Int, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(CourseColors.asColor(color))
+            .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Icon(Icons.Default.Check, contentDescription = null, tint = CourseColors.onColor(color), modifier = Modifier.size(14.dp))
+        }
+    }
 }
 
 @Composable
