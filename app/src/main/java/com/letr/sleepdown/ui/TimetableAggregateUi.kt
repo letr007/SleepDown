@@ -78,6 +78,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -88,6 +89,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -164,6 +166,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.time.DayOfWeek
 import java.time.LocalDate
 import kotlin.math.abs
+import kotlin.math.absoluteValue
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -320,8 +323,16 @@ internal fun AggregateScheduleScreen(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                beyondViewportPageCount = 0,
+                // One neighbour page keeps the adjacent week laid out, so a swipe never hitches.
+                beyondViewportPageCount = 1,
             ) { page ->
+                // Pages cross-dissolve instead of butting hard against each other.
+                val offset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = 1f - (offset * 0.35f).coerceIn(0f, 0.35f) },
+                ) {
                 AggregateSchedulePage(
                     table = table,
                     timetable = domain,
@@ -348,6 +359,7 @@ internal fun AggregateScheduleScreen(
                         }
                     },
                 )
+                }
             }
         }
     }
@@ -421,7 +433,15 @@ internal fun AggregateScheduleScreen(
             currentWeek = currentWeekFor(table),
             onSelect = { week ->
                 weekPicker = false
-                pagerScope.launch { pagerState.animateScrollToPage(week - 1) }
+                val target = (week - 1).coerceIn(0, (pagerState.pageCount - 1).coerceAtLeast(0))
+                pagerScope.launch {
+                    if (abs(target - pagerState.currentPage) <= 1) {
+                        pagerState.animateScrollToPage(target, animationSpec = Motion.onScreen())
+                    } else {
+                        // Distant jumps must not scroll past every week in between.
+                        pagerState.scrollToPage(target)
+                    }
+                }
             },
             onDismiss = { weekPicker = false },
         )
@@ -867,6 +887,9 @@ private fun AggregateSchedulePage(
                         }
                     }
                     selection?.let { selected ->
+                        // Appears with the M3 enter token instead of popping into place.
+                        val appear = remember { Animatable(0f) }
+                        LaunchedEffect(Unit) { appear.animateTo(1f, Motion.enter()) }
                         val x = columnWidth * days.indexOf(selected.day).toFloat()
                         val height = rowHeight * (selected.endNode - selected.startNode + 1).toFloat()
                         val rangeLabel = stringResource(R.string.period_range, selected.startNode, selected.endNode)
@@ -879,6 +902,12 @@ private fun AggregateSchedulePage(
                                 .width((columnWidth - 2.dp).coerceAtLeast(1.dp))
                                 .height(height - 2.dp)
                                 .zIndex(3f)
+                                .graphicsLayer {
+                                    alpha = appear.value
+                                    val scale = 0.92f + 0.08f * appear.value
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
                                 .background(accent.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
                                 .border(2.dp, accent, RoundedCornerShape(6.dp))
                                 .semantics { stateDescription = rangeLabel }
@@ -899,6 +928,7 @@ private fun AggregateSchedulePage(
                         SelectionResizeHandle(
                             modifier = Modifier
                                 .offset(x = handleX, y = handleY.coerceIn(0.dp, (gridHeight - 72.dp).coerceAtLeast(0.dp)))
+                                .graphicsLayer { alpha = appear.value }
                                 .semantics { stateDescription = rangeLabel },
                             rowHeightPx = rowHeightPx,
                             onDragRows = { delta -> selection = selection?.resizeBy(delta, nodeCount) },
@@ -985,10 +1015,10 @@ private fun AggregateOccurrenceCard(
     val currentOnClick by rememberUpdatedState(onClick)
     val currentOnMove by rememberUpdatedState(onMove)
     val currentMovingEnabled by rememberUpdatedState(movingEnabled)
-    // Springy pickup: the card lifts instead of snapping, the way a drag handle should feel.
+    // Picking a card up is direct manipulation, so it uses the motion-physics token.
     val cardScale by animateFloatAsState(
         targetValue = if (dragging) 1.05f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        animationSpec = Motion.press,
         label = "occurrenceCardScale",
     )
 
@@ -1257,6 +1287,7 @@ private fun AggregateOccurrenceDetailsSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AggregateRescheduleDialog(
     timetable: Timetable,
@@ -1291,54 +1322,89 @@ private fun AggregateRescheduleDialog(
         aggregateWeekdayName(day),
     ) + " " + stringResource(R.string.period_range, startNode, startNode + occurrence.nodeCount - 1)
 
-    AlertDialog(
+    fun submit() {
+        when {
+            targetEpochDay !in timetable.coverageRange -> error = context.getString(R.string.target_date_out_of_range)
+            else -> onConfirm(
+                TimetableCommand.RescheduleOccurrence(
+                    logicalSlotId = occurrence.logicalSlotId,
+                    originalEpochDay = occurrence.sourceEpochDay,
+                    targetEpochDay = targetEpochDay,
+                    recurrenceSegmentId = occurrence.recurrenceSegmentId,
+                    targetDayOfWeek = day,
+                    targetStartNode = startNode,
+                    targetNodeCount = occurrence.nodeCount,
+                    targetCustomTime = occurrence.minuteRange.takeIf { occurrence.usesCustomTime },
+                    targetTeacher = targetTeacher.trim(),
+                    targetRoom = targetRoom.trim(),
+                ),
+            )
+        }
+    }
+
+    // Same container as the course color picker: sheets for editing flows, dialogs for confirms.
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.reschedule_title)) },
-        text = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            Text(
+                text = stringResource(R.string.reschedule_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(stringResource(R.string.reschedule_description), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(stringResource(R.string.reschedule_description), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(onClick = { weekMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.week_number, week))
-                        }
-                        DropdownMenu(expanded = weekMenu, onDismissRequest = { weekMenu = false }) {
-                            (1..timetable.maxWeek.coerceAtLeast(1)).forEach { value ->
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.week_number, value)) },
-                                    onClick = { week = value; error = null; weekMenu = false },
-                                )
-                            }
+                    SleepDownSelectField(
+                        label = stringResource(R.string.week_count),
+                        value = stringResource(R.string.week_number, week),
+                        expanded = weekMenu,
+                        onExpandedChange = { weekMenu = it },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        (1..timetable.maxWeek.coerceAtLeast(1)).forEach { value ->
+                            SleepDownMenuItem(
+                                label = stringResource(R.string.week_number, value),
+                                selected = value == week,
+                                onClick = { week = value; error = null; weekMenu = false },
+                            )
                         }
                     }
-                    Box(modifier = Modifier.weight(1f)) {
-                        OutlinedButton(onClick = { dayMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(day)))
-                        }
-                        DropdownMenu(expanded = dayMenu, onDismissRequest = { dayMenu = false }) {
-                            (1..7).forEach { value ->
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(value))) },
-                                    onClick = { day = value; error = null; dayMenu = false },
-                                )
-                            }
+                    SleepDownSelectField(
+                        label = stringResource(R.string.weekday),
+                        value = stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(day)),
+                        expanded = dayMenu,
+                        onExpandedChange = { dayMenu = it },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        (1..7).forEach { value ->
+                            SleepDownMenuItem(
+                                label = stringResource(R.string.weekday_with_prefix, aggregateWeekdayName(value)),
+                                selected = value == day,
+                                onClick = { day = value; error = null; dayMenu = false },
+                            )
                         }
                     }
                 }
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { nodeMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.period_range, startNode, startNode + occurrence.nodeCount - 1))
-                    }
-                    DropdownMenu(expanded = nodeMenu, onDismissRequest = { nodeMenu = false }) {
-                        (1..lastStart).forEach { value ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.period_range, value, value + occurrence.nodeCount - 1)) },
-                                onClick = { startNode = value; error = null; nodeMenu = false },
-                            )
-                        }
+                SleepDownSelectField(
+                    label = stringResource(R.string.period),
+                    value = stringResource(R.string.period_range, startNode, startNode + occurrence.nodeCount - 1),
+                    expanded = nodeMenu,
+                    onExpandedChange = { nodeMenu = it },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    (1..lastStart).forEach { value ->
+                        SleepDownMenuItem(
+                            label = stringResource(R.string.period_range, value, value + occurrence.nodeCount - 1),
+                            selected = value == startNode,
+                            onClick = { startNode = value; error = null; nodeMenu = false },
+                        )
                     }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1369,30 +1435,14 @@ private fun AggregateRescheduleDialog(
                 )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                when {
-                    targetEpochDay !in timetable.coverageRange -> error = context.getString(R.string.target_date_out_of_range)
-                    else -> onConfirm(
-                        TimetableCommand.RescheduleOccurrence(
-                            logicalSlotId = occurrence.logicalSlotId,
-                            originalEpochDay = occurrence.sourceEpochDay,
-                            targetEpochDay = targetEpochDay,
-                            recurrenceSegmentId = occurrence.recurrenceSegmentId,
-                            targetDayOfWeek = day,
-                            targetStartNode = startNode,
-                            targetNodeCount = occurrence.nodeCount,
-                            targetCustomTime = occurrence.minuteRange.takeIf { occurrence.usesCustomTime },
-                            targetTeacher = targetTeacher.trim(),
-                            targetRoom = targetRoom.trim(),
-                        ),
-                    )
-                }
-            }) { Text(stringResource(R.string.save)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { submit() }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.save)) }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
 }
 
 @Composable

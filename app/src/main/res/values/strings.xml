@@ -108,6 +108,7 @@
     <string name="current_weekday_status">周%1$s</string>
     <string name="not_current_week">非本周</string>
     <string name="week_number">第%1$d周</string>
+    <string name="period">节次</string>
     <string name="add_course">添加课程</string>
     <string name="import_timetable">导入课表</string>
     <string name="backup_export">备份导出</string>

@@ -90,6 +90,7 @@
     <string name="current_weekday_status">%1$s</string>
     <string name="not_current_week">Other week</string>
     <string name="week_number">Week %1$d</string>
+    <string name="period">Periods</string>
     <string name="add_course">Add class</string>
     <string name="import_timetable">Import timetable</string>
     <string name="backup_export">Export backup</string>
