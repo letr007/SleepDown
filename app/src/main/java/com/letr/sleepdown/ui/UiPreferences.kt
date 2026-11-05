@@ -42,6 +42,8 @@ object SleepDownUiPreferences {
     private const val SHOW_EMPTY = "show_empty"
     private const val EMPTY_URI = "empty_uri"
     private const val BOTTOM_SPACING = "bottom_spacing"
+    private const val RECENT_COLORS = "recent_course_colors"
+    private const val RECENT_COLORS_LIMIT = 6
 
     fun read(context: Context): SleepDownUiSettings {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -57,6 +59,21 @@ object SleepDownUiPreferences {
     fun setShowEmptyImage(context: Context, show: Boolean) = edit(context) { putBoolean(SHOW_EMPTY, show) }
     fun setEmptyImageUri(context: Context, uri: String) = edit(context) { putString(EMPTY_URI, uri) }
     fun setBottomSpacing(context: Context, value: Int) = edit(context) { putInt(BOTTOM_SPACING, value.coerceIn(0, 240)) }
+
+    /** Course colors the user picked most recently, newest first. */
+    fun recentCourseColors(context: Context): List<Int> =
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(RECENT_COLORS, "")
+            .orEmpty()
+            .split(',')
+            .mapNotNull { it.toIntOrNull() }
+            .take(RECENT_COLORS_LIMIT)
+
+    fun rememberCourseColor(context: Context, color: Int) {
+        if (color == 0) return
+        val updated = (listOf(color) + recentCourseColors(context)).distinct().take(RECENT_COLORS_LIMIT)
+        edit(context) { putString(RECENT_COLORS, updated.joinToString(",")) }
+    }
 
     private inline fun edit(context: Context, block: android.content.SharedPreferences.Editor.() -> Unit) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply(block).apply()

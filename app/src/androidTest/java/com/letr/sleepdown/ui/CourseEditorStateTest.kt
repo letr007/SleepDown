@@ -27,7 +27,7 @@ class CourseEditorStateTest {
     @Test
     fun splitWeeksReopenAsOneTimeSlotAndKeepUnchangedIdentities() {
         val rows = listOf(row(11, 1, 3, "first"), row(12, 7, 9, "second"))
-        val draft = courseTimeDrafts(course, rows).single()
+        val draft = courseTimeDrafts(rows).single()
         assertEquals(setOf(1, 2, 3, 7, 8, 9), draft.selectedWeeks)
         assertEquals(rows, draft.toEntities(course.id))
         val renamedRoom = draft.copy(room = "Room B").toEntities(course.id)
@@ -37,11 +37,13 @@ class CourseEditorStateTest {
     }
 
     @Test
-    fun differentTeachersOrTimesStaySeparatelyEditable() {
+    fun teacherDoesNotSplitTimeSlotsButTimesStillDo() {
         val rows = listOf(row(11, 1, 3, "first"), row(12, 7, 9, "second").copy(teacher = "Substitute"))
-        assertEquals(2, courseTimeDrafts(course, rows).size)
-        val moved = rows[1].copy(teacher = "", day = 3)
-        assertEquals(2, courseTimeDrafts(course, listOf(rows[0], moved)).size)
+        val single = courseTimeDrafts(rows).single()
+        assertEquals(setOf(1, 2, 3, 7, 8, 9), single.selectedWeeks)
+        assertTrue(single.toEntities(course.id, teacher = "陈老师").all { it.teacher == "陈老师" })
+        val moved = rows[1].copy(day = 3)
+        assertEquals(2, courseTimeDrafts(listOf(rows[0], moved)).size)
     }
 
     @Test
@@ -49,7 +51,7 @@ class CourseEditorStateTest {
         for (selection in listOf(setOf(2), setOf(1, 3, 9), setOf(2, 4, 8), setOf(1, 2, 4, 5, 7))) {
             val draft = defaultTimeDraft(10, 3, 2).copy(selectedWeeks = selection)
             val rows = draft.toEntities(course.id)
-            val restored = courseTimeDrafts(course, rows).single()
+            val restored = courseTimeDrafts(rows).single()
             assertEquals(selection, restored.selectedWeeks)
             assertEquals(selection, actualWeeks(restored.toEntities(course.id)))
         }
@@ -61,7 +63,7 @@ class CourseEditorStateTest {
             row(11, 1, 9, "odd").copy(weekType = CourseTimeEntity.TYPE_ODD),
             row(12, 2, 8, "even").copy(weekType = CourseTimeEntity.TYPE_EVEN),
         )
-        val draft = courseTimeDrafts(course, rows).single()
+        val draft = courseTimeDrafts(rows).single()
         assertEquals((1..9).toSet(), draft.selectedWeeks)
         assertEquals(rows, draft.toEntities(course.id))
     }

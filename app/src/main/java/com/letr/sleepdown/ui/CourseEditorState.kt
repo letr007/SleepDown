@@ -1,6 +1,5 @@
 package com.letr.sleepdown.ui
 
-import com.letr.sleepdown.data.CourseEntity
 import com.letr.sleepdown.data.CourseTimeEntity
 import com.letr.sleepdown.logic.Weeks
 import java.util.UUID
@@ -12,7 +11,6 @@ internal data class TimeDraft(
     val step: Int = 2,
     val selectedWeeks: Set<Int> = emptySet(),
     val room: String = "",
-    val teacher: String = "",
     val logicalSlotId: String = UUID.randomUUID().toString(),
     val recurrenceSegmentId: String = UUID.randomUUID().toString(),
     val ownTime: Boolean = false,
@@ -34,16 +32,16 @@ internal fun defaultTimeDraft(maxWeek: Int, day: Int, startNode: Int, step: Int 
 private fun CourseTimeEntity.weeks(): Set<Int> = (startWeek..endWeek)
     .filter { Weeks.inWeek(startWeek, endWeek, weekType, it) }.toSet()
 
-internal fun courseTimeDrafts(course: CourseEntity, rows: List<CourseTimeEntity>): List<TimeDraft> {
+internal fun courseTimeDrafts(rows: List<CourseTimeEntity>): List<TimeDraft> {
     // Recurrence rows share an editor block only when their effective time and location agree.
     return rows.groupBy { row ->
-        val legacy = row.logicalSlotId.isBlank() || row.logicalSlotId == "legacy"
+        // Teacher is course-level; it no longer splits editor blocks.
         row.copy(
             id = 0L,
             startWeek = 0,
             endWeek = 0,
             weekType = 0,
-            teacher = if (legacy && row.recurrenceSegmentId == "legacy") row.teacher.ifBlank { course.teacher } else row.teacher,
+            teacher = "",
             recurrenceSegmentId = "",
         )
     }.values.map { source ->
@@ -57,7 +55,6 @@ internal fun courseTimeDrafts(course: CourseEntity, rows: List<CourseTimeEntity>
             step = first.step,
             selectedWeeks = selected,
             room = first.room,
-            teacher = if (legacy && first.recurrenceSegmentId == "legacy") first.teacher.ifBlank { course.teacher } else first.teacher,
             logicalSlotId = if (legacy) UUID.randomUUID().toString() else first.logicalSlotId,
             recurrenceSegmentId = first.recurrenceSegmentId.takeUnless { it.isBlank() || it == "legacy" } ?: UUID.randomUUID().toString(),
             ownTime = first.ownTime,
@@ -74,7 +71,7 @@ private fun weekPatternFor(weeks: Set<Int>): Int = when {
     else -> CourseTimeEntity.TYPE_ALL
 }
 
-internal fun TimeDraft.toEntities(courseId: Long): List<CourseTimeEntity> {
+internal fun TimeDraft.toEntities(courseId: Long, teacher: String = ""): List<CourseTimeEntity> {
     val weeks = selectedWeeks.filter { it > 0 }.sorted()
     if (weeks.isEmpty()) return emptyList()
     fun update(row: CourseTimeEntity) = row.copy(
@@ -132,6 +129,7 @@ internal fun validCourseCredit(value: String): Boolean = value.isBlank() ||
     value.toFloatOrNull()?.let { it.isFinite() && it >= 0f } == true
 
 internal data class CourseEditorSnapshot(
+    val teacher: String,
     val name: String,
     val color: Int,
     val credit: String,

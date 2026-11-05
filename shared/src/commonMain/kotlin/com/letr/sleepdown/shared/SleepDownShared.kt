@@ -59,22 +59,33 @@ import androidx.compose.ui.unit.sp
 
 /** Shared palette used by Android and iOS so course colors stay consistent. */
 object SleepDownPalette {
+    /** Thirteen hues at three depths (deep, vivid, soft), hue-major for the picker grid. */
     val colors: List<Int> = listOf(
-        0xFFFF1744.toInt(),
-        0xFFFA6278.toInt(),
-        0xFF2979FF.toInt(),
-        0xFF1DE9B6.toInt(),
-        0xFFA375FF.toInt(),
-        0xFFFF9100.toInt(),
-        0xFFFF3D00.toInt(),
-        0xFF2196F3.toInt(),
-        0xFF005CAF.toInt(),
+        0xFFC62828.toInt(), 0xFFE53935.toInt(), 0xFFFFCDD2.toInt(),
+        0xFFAD1457.toInt(), 0xFFD81B60.toInt(), 0xFFF8BBD0.toInt(),
+        0xFF6A1B9A.toInt(), 0xFF8E24AA.toInt(), 0xFFE1BEE7.toInt(),
+        0xFF283593.toInt(), 0xFF3949AB.toInt(), 0xFFC5CAE9.toInt(),
+        0xFF1565C0.toInt(), 0xFF1E88E5.toInt(), 0xFFBBDEFB.toInt(),
+        0xFF00838F.toInt(), 0xFF00ACC1.toInt(), 0xFFB2EBF2.toInt(),
+        0xFF00695C.toInt(), 0xFF00897B.toInt(), 0xFFB2DFDB.toInt(),
+        0xFF2E7D32.toInt(), 0xFF43A047.toInt(), 0xFFC8E6C9.toInt(),
+        0xFF558B2F.toInt(), 0xFF7CB342.toInt(), 0xFFDCEDC8.toInt(),
+        0xFFFF8F00.toInt(), 0xFFFFB300.toInt(), 0xFFFFECB3.toInt(),
+        0xFFE65100.toInt(), 0xFFFB8C00.toInt(), 0xFFFFE0B2.toInt(),
+        0xFF4E342E.toInt(), 0xFF6D4C41.toInt(), 0xFFD7CCC8.toInt(),
+        0xFF37474F.toInt(), 0xFF607D8B.toInt(), 0xFFCFD8DC.toInt(),
     )
 
+    /** The same swatches grouped by hue, deep → vivid → soft. */
+    val families: List<List<Int>>
+        get() = colors.chunked(3)
+
+    /** Auto color picks only the vivid tone: soft tones cannot carry the card's white label. */
     fun colorFor(name: String): Int {
+        val vivid = families.map { it[1] }
         var hash = 0
         name.forEach { hash = hash * 31 + it.code }
-        return colors[((hash % colors.size) + colors.size) % colors.size]
+        return vivid[((hash % vivid.size) + vivid.size) % vivid.size]
     }
 }
 

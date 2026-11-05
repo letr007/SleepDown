@@ -90,6 +90,7 @@
     <string name="current_weekday_status">%1$s</string>
     <string name="not_current_week">Other week</string>
     <string name="week_number">Week %1$d</string>
+    <string name="period">Periods</string>
     <string name="add_course">Add class</string>
     <string name="import_timetable">Import timetable</string>
     <string name="backup_export">Export backup</string>
@@ -229,6 +230,8 @@
     <string name="teacher">Teacher</string>
     <string name="room">Location</string>
     <string name="course_color">Class color</string>
+    <string name="recent_colors">Recent</string>
+    <string name="hex_color">HEX</string>
     <string name="custom_time">Custom time</string>
     <string name="custom_time_info">With custom time enabled, the class is positioned by its start and end times.</string>
     <string name="course_name">Class name</string>
@@ -285,6 +288,7 @@
     <string name="loading">Loading…</string>
     <string name="confirm">Confirm</string>
     <string name="auto_color">Auto</string>
+    <string name="auto_color_full">Auto</string>
     <string name="select_date">Select date</string>
     <string name="select_time">Select time</string>
     <string name="not_selected">Not selected</string>
@@ -435,6 +439,8 @@
     <string name="delete_slot_description">Delete all recurring occurrences of this time slot.</string>
     <string name="delete_whole_course_description">Delete the entire class and all of its time slots.</string>
     <string name="reschedule_title">Reschedule</string>
+    <string name="reschedule_current">Now: %1$s</string>
+    <string name="reschedule_target">To: %1$s</string>
     <string name="reschedule_description">Only this occurrence is affected; the original recurrence rule remains.</string>
     <string name="target_date">Target date (yyyy-MM-dd)</string>
     <string name="valid_date_required">Enter a valid date</string>
