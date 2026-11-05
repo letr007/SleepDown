@@ -191,6 +191,7 @@
     <string name="header_text_size">Header text size</string>
     <string name="show_time_bar">Show times beside periods</string>
     <string name="course_cells">Class cells</string>
+    <string name="cell_text_and_size">Text and size</string>
     <string name="course_text_color">Class text color</string>
     <string name="course_text_overlay">Blend class text with cell color</string>
     <string name="cell_border_color">Cell border color</string>

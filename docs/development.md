@@ -83,7 +83,7 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
 
 ## 版本与发布
 
-Android 当前为 `0.2.0`，构建号 `7`。iOS 保留 `0.1.0-beta.4`，构建号 `5`。两个平台独立维护版本和构建号。
+Android 当前为 `0.3.0`，构建号 `8`。iOS 保留 `0.1.0-beta.4`，构建号 `5`。两个平台独立维护版本和构建号。
 
 | 平台 | 完整版本 | 构建号 | 发布标签 |
 | --- | --- | --- | --- |
