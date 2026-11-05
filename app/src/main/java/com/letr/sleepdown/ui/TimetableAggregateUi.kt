@@ -574,7 +574,12 @@ internal fun aggregateOtherWeekOccurrences(timetable: Timetable, week: Int): Lis
 }
 
 @Composable
-internal fun AggregateAppearancePreview(repository: TimetableRepository, table: TableEntity) {
+internal fun AggregateAppearancePreview(
+    repository: TimetableRepository,
+    table: TableEntity,
+    height: Dp,
+    collapsed: Boolean,
+) {
     var timetable by remember(table.id) { mutableStateOf<Timetable?>(null) }
     LaunchedEffect(table.id) {
         timetable = repository.loadDomainTimetableOrNull(table.id)
@@ -615,12 +620,19 @@ internal fun AggregateAppearancePreview(repository: TimetableRepository, table: 
         )
     }
     val previewWeek = currentWeekFor(table).coerceIn(1, previewTimetable.maxWeek.coerceAtLeast(1))
+    // Bottom corners and a lift once collapsed, so the scrolling list reads as passing under it.
+    val previewShape = RoundedCornerShape(
+        topStart = 0.dp,
+        topEnd = 0.dp,
+        bottomStart = if (collapsed) 16.dp else 0.dp,
+        bottomEnd = if (collapsed) 16.dp else 0.dp,
+    )
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(320.dp),
-        shape = RoundedCornerShape(table.radius.coerceIn(0, 32).dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(height),
+        shape = previewShape,
+        elevation = CardDefaults.cardElevation(defaultElevation = if (collapsed) 6.dp else 0.dp),
     ) {
-        Box(modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(table.radius.coerceIn(0, 32).dp))) {
+        Box(modifier = Modifier.fillMaxSize().clip(previewShape)) {
             AggregateScheduleBackground(table)
             AggregateSchedulePage(
                 table = table,

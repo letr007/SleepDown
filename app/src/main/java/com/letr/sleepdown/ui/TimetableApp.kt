@@ -142,6 +142,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -286,13 +295,22 @@ fun TimetableApp(
     var screenStack by rememberSaveable { mutableStateOf(arrayListOf(AppScreen.WEEK.name)) }
     val screen = AppScreen.valueOf(screenStack.last())
     val screenState = rememberSaveableStateHolder()
+    // Drives the direction of the page transition, so back feels like undoing the push.
+    var navForward by remember { mutableStateOf(true) }
     fun navigate(destination: AppScreen) {
-        if (screen != destination) screenStack = ArrayList(screenStack + destination.name)
+        if (screen != destination) {
+            navForward = true
+            screenStack = ArrayList(screenStack + destination.name)
+        }
     }
     fun goBack() {
-        if (screenStack.size > 1) screenStack = ArrayList(screenStack.dropLast(1))
+        if (screenStack.size > 1) {
+            navForward = false
+            screenStack = ArrayList(screenStack.dropLast(1))
+        }
     }
     fun goHome() {
+        navForward = false
         screenStack = arrayListOf(AppScreen.WEEK.name)
     }
     var editingTableId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -415,8 +433,18 @@ fun TimetableApp(
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        screenState.SaveableStateProvider(screen.name) {
-        when (screen) {
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                // Pushed screens enter from the trailing edge, popped ones leave the way they came.
+                val direction = if (navForward) 1 else -1
+                (slideInHorizontally { direction * it / 10 } + fadeIn(Motion.onScreen())) togetherWith
+                    (slideOutHorizontally { -direction * it / 10 } + fadeOut(Motion.utility()))
+            },
+            label = "appScreenTransition",
+        ) { target ->
+        screenState.SaveableStateProvider(target.name) {
+        when (target) {
             AppScreen.WEEK -> {
                 if (tableMeta == null || table == null) {
                     LoadingView()
@@ -580,6 +608,7 @@ fun TimetableApp(
             )
             AppScreen.WIDGET_HELP -> WidgetHelpScreen(onBack = ::goBack)
             AppScreen.DISPLAY_SETTINGS -> DisplaySettingsScreen(onBack = ::goBack)
+        }
         }
         }
     }
@@ -1497,7 +1526,7 @@ private fun SettingRow(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
@@ -1750,17 +1779,15 @@ private fun TableSettingsScreen(
         )
     }
     numberDialog?.let { field ->
-        val initial = if (field == "nodeCount") working.nodeCount.toString() else working.maxWeek.toString()
-        TextInputDialog(
+        SleepDownNumberSheet(
             title = if (field == "nodeCount") stringResource(R.string.nodes_per_day) else stringResource(R.string.term_weeks),
-            initial = initial,
-            number = true,
-            validation = { value -> if (value.toIntOrNull() == null) context.getString(R.string.invalid_number) else null },
-            onConfirm = { value ->
-            val number = value.toIntOrNull()
-            if (number != null) {
-                working = if (field == "nodeCount") working.copy(nodeCount = number.coerceIn(1, 60)) else working.copy(maxWeek = number.coerceIn(1, 60))
-            }
+            value = (if (field == "nodeCount") working.nodeCount else working.maxWeek).toFloat(),
+            range = 1f..60f,
+            step = 1f,
+            suffix = "",
+            onConfirm = { entered ->
+                val number = entered.roundToInt().coerceIn(1, 60)
+                working = if (field == "nodeCount") working.copy(nodeCount = number) else working.copy(maxWeek = number)
                 numberDialog = null
             },
             onDismiss = { numberDialog = null },
@@ -1904,7 +1931,7 @@ private fun AppearanceScreen(
 ) {
     var working by remember(table) { mutableStateOf(table) }
     var colorTarget by remember { mutableStateOf<String?>(null) }
-    var inputTarget by remember { mutableStateOf<String?>(null) }
+    var numberTarget by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -1926,16 +1953,25 @@ private fun AppearanceScreen(
             showToast(context, context.getString(R.string.save_success))
             onBack()
         },
-        actions = {
-            IconButton(onClick = {
-                onSave(working)
-                showToast(context, context.getString(R.string.save_success))
-            }) { Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save)) }
-        },
     ) { padding ->
+        // The preview gives up height as the list moves, instead of sitting there as a fixed block.
+        val listState = rememberLazyListState()
+        val collapsed by remember {
+            derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 24 }
+        }
+        val previewHeight by animateDpAsState(
+            targetValue = if (collapsed) 176.dp else 320.dp,
+            animationSpec = Motion.onScreen(),
+            label = "appearancePreviewHeight",
+        )
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            AggregateAppearancePreview(repository = repository, table = working)
-            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            AggregateAppearancePreview(repository = repository, table = working, height = previewHeight, collapsed = collapsed)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
             item {
                 SettingsGroup(stringResource(R.string.overall)) {
                     SettingRow(
@@ -1955,7 +1991,7 @@ private fun AppearanceScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.TextFields, stringResource(R.string.interface_text_color), colorName(working.textColor.toInt()), tint = Color(0xFF2AA69B), onClick = { colorTarget = "text" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.TextFields, stringResource(R.string.header_text_size), stringResource(R.string.size_sp, working.headerTextSize), tint = Color(0xFF2AA69B), onClick = { inputTarget = "headerTextSize" })
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.header_text_size), stringResource(R.string.size_sp, working.headerTextSize), tint = Color(0xFF2AA69B), onClick = { numberTarget = "headerTextSize" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.AccessTime, stringResource(R.string.show_time_bar), trailing = { Switch(checked = working.showTimeBar, onCheckedChange = { working = working.copy(showTimeBar = it) }) }, onClick = { working = working.copy(showTimeBar = !working.showTimeBar) })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -1979,16 +2015,19 @@ private fun AppearanceScreen(
                     SettingRow(Icons.Default.Palette, stringResource(R.string.border_uses_cell_color), trailing = { Switch(checked = working.strokeColorCompose, onCheckedChange = { working = working.copy(strokeColorCompose = it) }) }, onClick = { working = working.copy(strokeColorCompose = !working.strokeColorCompose) })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.GridOn, stringResource(R.string.dotted_border), trailing = { Switch(checked = working.useDottedLine, onCheckedChange = { working = working.copy(useDottedLine = it) }) }, onClick = { working = working.copy(useDottedLine = !working.useDottedLine) })
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.cell_text_and_size)) {
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.cell_height), stringResource(R.string.size_dp, working.itemHeightDp), tint = Color(0xFF8D62C8), onClick = { numberTarget = "height" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Tune, stringResource(R.string.cell_height), stringResource(R.string.size_dp, working.itemHeightDp), tint = Color(0xFF8D62C8), onClick = { inputTarget = "height" })
+                    SettingRow(Icons.Default.Tune, stringResource(R.string.corner_radius), stringResource(R.string.size_dp, working.radius), tint = Color(0xFF8D62C8), onClick = { numberTarget = "radius" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Tune, stringResource(R.string.corner_radius), stringResource(R.string.size_dp, working.radius), tint = Color(0xFF8D62C8), onClick = { inputTarget = "radius" })
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.course_opacity), stringResource(R.string.percentage, (working.itemAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { numberTarget = "alpha" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Palette, stringResource(R.string.course_opacity), stringResource(R.string.percentage, (working.itemAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { inputTarget = "alpha" })
+                    SettingRow(Icons.Default.Palette, stringResource(R.string.other_week_opacity), stringResource(R.string.percentage, (working.otherWeekAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { numberTarget = "otherAlpha" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.Palette, stringResource(R.string.other_week_opacity), stringResource(R.string.percentage, (working.otherWeekAlpha * 100).toInt()), tint = Color(0xFF8D62C8), onClick = { inputTarget = "otherAlpha" })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow(Icons.Default.TextFields, stringResource(R.string.course_text_size), stringResource(R.string.size_sp_float, working.itemTextSize), tint = Color(0xFF4E7BD9), onClick = { inputTarget = "itemTextSize" })
+                    SettingRow(Icons.Default.TextFields, stringResource(R.string.course_text_size), stringResource(R.string.size_sp_float, working.itemTextSize), tint = Color(0xFF4E7BD9), onClick = { numberTarget = "itemTextSize" })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow(Icons.Default.TextFields, stringResource(R.string.horizontal_center), trailing = { Switch(checked = working.itemCenterHorizontal, onCheckedChange = { working = working.copy(itemCenterHorizontal = it) }) }, onClick = { working = working.copy(itemCenterHorizontal = !working.itemCenterHorizontal) })
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -2025,7 +2064,7 @@ private fun AppearanceScreen(
     }
 
     colorTarget?.let { target ->
-        ColorChoiceDialog(
+        AppearanceColorSheet(
             title = when (target) {
                 "text" -> stringResource(R.string.interface_text_color)
                 "course" -> stringResource(R.string.course_text_color)
@@ -2043,40 +2082,50 @@ private fun AppearanceScreen(
             onDismiss = { colorTarget = null },
         )
     }
-    inputTarget?.let { target ->
-        val initial = when (target) {
-            "headerTextSize" -> working.headerTextSize.toString()
-            "height" -> working.itemHeightDp.toString()
-            "radius" -> working.radius.toString()
-            "alpha" -> (working.itemAlpha * 100).toInt().toString()
-            "otherAlpha" -> (working.otherWeekAlpha * 100).toInt().toString()
-            else -> working.itemTextSize.toString()
+    numberTarget?.let { target ->
+        val value = when (target) {
+            "headerTextSize" -> working.headerTextSize.toFloat()
+            "height" -> working.itemHeightDp.toFloat()
+            "radius" -> working.radius.toFloat()
+            "alpha" -> working.itemAlpha * 100f
+            "otherAlpha" -> working.otherWeekAlpha * 100f
+            else -> working.itemTextSize
         }
-        TextInputDialog(
+        SleepDownNumberSheet(
             title = when (target) {
                 "headerTextSize" -> stringResource(R.string.header_text_size)
                 "height" -> stringResource(R.string.cell_height)
                 "radius" -> stringResource(R.string.corner_radius)
-                "alpha" -> stringResource(R.string.opacity_range, stringResource(R.string.course_opacity))
-                "otherAlpha" -> stringResource(R.string.opacity_range, stringResource(R.string.other_week_opacity))
+                "alpha" -> stringResource(R.string.course_opacity)
+                "otherAlpha" -> stringResource(R.string.other_week_opacity)
                 else -> stringResource(R.string.course_text_size)
             },
-            initial = initial,
-            number = true,
-            clearable = false,
-            onConfirm = { value ->
-                val number = value.toFloatOrNull()
-                working = when (target) {
-                    "headerTextSize" -> working.copy(headerTextSize = number?.toInt()?.coerceIn(8, 32) ?: working.headerTextSize)
-                    "height" -> working.copy(itemHeightDp = number?.toInt()?.coerceIn(32, 128) ?: working.itemHeightDp)
-                    "radius" -> working.copy(radius = number?.toInt()?.coerceIn(0, 32) ?: working.radius)
-                    "alpha" -> working.copy(itemAlpha = (number ?: (working.itemAlpha * 100)).coerceIn(0f, 100f) / 100f)
-                    "otherAlpha" -> working.copy(otherWeekAlpha = (number ?: (working.otherWeekAlpha * 100)).coerceIn(0f, 100f) / 100f)
-                    else -> working.copy(itemTextSize = number?.coerceIn(8f, 32f) ?: working.itemTextSize)
-                }
-                inputTarget = null
+            value = value,
+            range = when (target) {
+                "height" -> 32f..128f
+                "radius" -> 0f..32f
+                "alpha", "otherAlpha" -> 0f..100f
+                else -> 8f..32f
             },
-            onDismiss = { inputTarget = null },
+            step = if (target == "itemTextSize") 0.5f else 1f,
+            suffix = when (target) {
+                "alpha", "otherAlpha" -> "%"
+                "height", "radius" -> " dp"
+                else -> " sp"
+            },
+            decimals = if (target == "itemTextSize") 1 else 0,
+            onConfirm = { entered ->
+                working = when (target) {
+                    "headerTextSize" -> working.copy(headerTextSize = entered.roundToInt())
+                    "height" -> working.copy(itemHeightDp = entered.roundToInt())
+                    "radius" -> working.copy(radius = entered.roundToInt())
+                    "alpha" -> working.copy(itemAlpha = entered / 100f)
+                    "otherAlpha" -> working.copy(otherWeekAlpha = entered / 100f)
+                    else -> working.copy(itemTextSize = entered)
+                }
+                numberTarget = null
+            },
+            onDismiss = { numberTarget = null },
         )
     }
 }
@@ -3529,6 +3578,129 @@ private fun CourseColorSheet(
     }
 }
 
+/**
+ * Appearance color sheet: the same editor as the course picker, plus an alpha channel,
+ * because border colors are semi-transparent by design.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppearanceColorSheet(
+    title: String,
+    initial: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val start = remember(initial) { Color(initial) }
+    val startHsv = remember(start) { start.toHsv() }
+    var hue by remember(initial) { mutableFloatStateOf(startHsv.first) }
+    var saturation by remember(initial) { mutableFloatStateOf(startHsv.second.takeIf { it > 0f } ?: 0.72f) }
+    var brightness by remember(initial) { mutableFloatStateOf(startHsv.third.takeIf { it > 0f } ?: 0.9f) }
+    var alpha by remember(initial) { mutableFloatStateOf(start.alpha.takeIf { it > 0f } ?: 1f) }
+    var hexInput by remember(initial) { mutableStateOf(Color(0xFF000000.toInt() or (initial and 0xFFFFFF)).toHexString()) }
+    val pending = Color.hsv(hue, saturation, brightness).copy(alpha = alpha)
+
+    LaunchedEffect(pending) {
+        val current = pending.toHexString()
+        if (!hexInput.equals(current, ignoreCase = true)) hexInput = current
+    }
+
+    fun applyHex(parsed: Color) {
+        val hsv = parsed.toHsv()
+        hue = hsv.first
+        saturation = hsv.second
+        brightness = hsv.third
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(pending),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.appearance_preview_course),
+                        color = CourseColors.onColor(pending.toArgbCompat()),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
+                SaturationValueSquare(
+                    hue = hue,
+                    saturation = saturation,
+                    brightness = brightness,
+                    modifier = Modifier.fillMaxWidth().height(132.dp),
+                    onChange = { s, v -> saturation = s; brightness = v },
+                )
+                HueStrip(
+                    hue = hue,
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    onChange = { hue = it },
+                )
+                RgbChannelRow(
+                    label = "R",
+                    value = pending.red,
+                    gradient = Brush.horizontalGradient(listOf(Color(0f, pending.green, pending.blue), Color(1f, pending.green, pending.blue))),
+                    onChange = { applyHex(Color(it, pending.green, pending.blue)) },
+                )
+                RgbChannelRow(
+                    label = "G",
+                    value = pending.green,
+                    gradient = Brush.horizontalGradient(listOf(Color(pending.red, 0f, pending.blue), Color(pending.red, 1f, pending.blue))),
+                    onChange = { applyHex(Color(pending.red, it, pending.blue)) },
+                )
+                RgbChannelRow(
+                    label = "B",
+                    value = pending.blue,
+                    gradient = Brush.horizontalGradient(listOf(Color(pending.red, pending.green, 0f), Color(pending.red, pending.green, 1f))),
+                    onChange = { applyHex(Color(pending.red, pending.green, it)) },
+                )
+                RgbChannelRow(
+                    label = "A",
+                    value = alpha,
+                    gradient = Brush.horizontalGradient(listOf(pending.copy(alpha = 0f), pending.copy(alpha = 1f))),
+                    valueLabel = "${(alpha * 100f).roundToInt()}%",
+                    onChange = { alpha = it },
+                )
+                OutlinedTextField(
+                    value = hexInput,
+                    onValueChange = { text ->
+                        hexInput = text
+                        parseHexColor(text)?.let(::applyHex)
+                    },
+                    label = { Text(stringResource(R.string.hex_color)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { onSelect(pending.toArgbCompat()) }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
 /** Saturation (x) over brightness (y) for the current hue. */
 @Composable
 private fun SaturationValueSquare(
@@ -3597,7 +3769,13 @@ private fun HueStrip(hue: Float, modifier: Modifier, onChange: (Float) -> Unit) 
 }
 
 @Composable
-private fun RgbChannelRow(label: String, value: Float, gradient: Brush, onChange: (Float) -> Unit) {
+private fun RgbChannelRow(
+    label: String,
+    value: Float,
+    gradient: Brush,
+    onChange: (Float) -> Unit,
+    valueLabel: String = (value * 255f).roundToInt().toString(),
+) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(14.dp))
         BoxWithConstraints(
@@ -3625,10 +3803,10 @@ private fun RgbChannelRow(label: String, value: Float, gradient: Brush, onChange
             )
         }
         Text(
-            text = (value * 255f).roundToInt().toString(),
+            text = valueLabel,
             fontSize = 12.sp,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(32.dp),
+            modifier = Modifier.width(36.dp),
         )
     }
 }
@@ -3697,31 +3875,66 @@ private fun ColorSwatch(color: Int, selected: Boolean, modifier: Modifier, onCli
     }
 }
 
+/**
+ * Numeric setting editor. The slider covers coarse movement; the step buttons exist so a
+ * value can always be hit exactly, which typing was good at and a slider alone is not.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ColorChoiceDialog(
+private fun SleepDownNumberSheet(
     title: String,
-    initial: Int,
-    includeAuto: Boolean = false,
-    onSelect: (Int) -> Unit,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    step: Float,
+    suffix: String,
+    decimals: Int = 0,
+    onConfirm: (Float) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    var current by remember(value) { mutableFloatStateOf(value.coerceIn(range.start, range.endInclusive)) }
+    fun snapped(next: Float): Float {
+        val bounded = next.coerceIn(range.start, range.endInclusive)
+        return (bounded / step).roundToInt() * step
+    }
+    val steps = (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceAtLeast(0)
+    val label = if (decimals == 0) {
+        "${current.roundToInt()}$suffix"
+    } else {
+        "${String.format(java.util.Locale.US, "%.${decimals}f", current)}$suffix"
+    }
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (includeAuto) {
-                    Surface(modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSelect(0) }, color = Color.White, border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBDBDBD))) {
-                        Box(contentAlignment = Alignment.Center) { Text(stringResource(R.string.auto_color), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text(label, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Slider(
+                value = current,
+                onValueChange = { current = snapped(it) },
+                valueRange = range,
+                steps = steps,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { current = snapped(current - step) }, modifier = Modifier.weight(1f)) {
+                    Text("\u2212", fontSize = 18.sp)
                 }
-                (listOf(Color.Black.toArgbCompat(), Color.White.toArgbCompat()) + CourseColors.all()).distinct().forEach { color ->
-                    Surface(modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onSelect(color) }, color = CourseColors.asColor(color), border = androidx.compose.foundation.BorderStroke(if (color == initial) 3.dp else 1.dp, if (color == initial) MaterialTheme.colorScheme.onSurface else Color(0xFFDDDDDD))) {}
+                OutlinedButton(onClick = { current = snapped(current + step) }, modifier = Modifier.weight(1f)) {
+                    Text("+", fontSize = 18.sp)
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { onConfirm(current) }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
 }
 
 @Composable

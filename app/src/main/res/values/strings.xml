@@ -209,6 +209,7 @@
     <string name="header_text_size">表头文字大小</string>
     <string name="show_time_bar">节数栏显示时间</string>
     <string name="course_cells">课程格子</string>
+    <string name="cell_text_and_size">文字与尺寸</string>
     <string name="course_text_color">课程文字颜色</string>
     <string name="course_text_overlay">课程文字颜色叠加格子颜色</string>
     <string name="cell_border_color">格子边框颜色</string>
